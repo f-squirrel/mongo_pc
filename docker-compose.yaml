@@ -6,26 +6,22 @@ services:
     image: mongo:6.0.14
     init: true
     hostname: mongodb
-    # networks:
-    #   inner:
-    #     ipv4_address: 2.2.2.61
-    # volumes:
-    #   - ${MONGO_DB_DIR}:/data/db
     user: "${UID}:${GID}"
-    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
+    command: ["sh", "-c", "mongod --replSet rs0 --bind_ip_all --port 27017 && mongo --eval 'while (!rs.initiate({_id:\"rs0\",members:[{_id:0,host:\"mongodb:27017\"}]}) && !rs.status().ok) { sleep(100); }'"]
+    # command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
     # extra_hosts:
     #   - "host.docker.internal:host-gateway"
-    healthcheck:
-      # test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'rs0',members:[{_id:0,host:'host.docker.internal:27017'}]}) }" | mongosh --port 27017 --quiet
-      test: test $$(mongosh --port 27017 --quiet --eval "try {rs.initiate({_id:'rs0',members:[{_id:0,host:\"mongo:30001\"}]})} catch(e) {rs.status().ok}") -eq 1
-      interval: 5s
-      timeout: 30s
-      start_period: 0s
-      # start_interval: 1s
-      retries: 30
+    # healthcheck:
+    #   # test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'rs0',members:[{_id:0,host:'host.docker.internal:27017'}]}) }" | mongosh --port 27017 --quiet
+    #   test: test $$(mongosh --port 27017 --quiet --eval "try {rs.initiate({_id:'rs0',members:[{_id:0,host:\"mongo:27017\"}]})} catch(e) {rs.status().ok}") -eq 1
+    #   interval: 5s
+    #   timeout: 30s
+    #   start_period: 0s
+    #   # start_interval: 1s
+    #   retries: s0
     ports:
       - 27017:27017
-    attach: false
+    attach: true
 
   producer:
     image: mongo_tput:lastest
@@ -42,7 +38,8 @@ services:
     volumes:
       - ./:/producer
     environment:
-      - RUST_BACKTRACE=full
+      - RUST_BACKTRACE=1
+      - RUST_LOG=debug
     # networks:
     #   inner:
     #     ipv4_address: 2.2.2.60
@@ -68,7 +65,8 @@ services:
     volumes:
       - ./:/consumer1
     environment:
-      - RUST_BACKTRACE=full
+      - RUST_BACKTRACE=1
+      - RUST_LOG=debug
     # networks:
     #   inner:
     #     ipv4_address: 2.2.2.60
@@ -97,6 +95,7 @@ services:
       - ./:/consumer2
     environment:
       - RUST_BACKTRACE=full
+      - RUST_LOG=debug
     # networks:
     #   inner:
     #     ipv4_address: 2.2.2.60
