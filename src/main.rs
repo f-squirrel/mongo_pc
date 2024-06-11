@@ -58,6 +58,15 @@ enum Status {
     Finalized,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StatusQuery {
+    Pending,
+    Approved,
+    Sent,
+    Finalized,
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize, Getters)]
 #[serde(rename_all = "snake_case")]
 struct Data {
@@ -96,14 +105,24 @@ async fn produce(collection: Collection<Data>) {
     log::info!("Data produced");
 }
 
-async fn consume_created(collection: Collection<Data>, from: Status, to: Status) {
+async fn consume_created(
+    collection: Collection<Data>,
+    from: StatusQuery,
+    to: StatusQuery,
+    update: Status,
+) {
     let pipeline = vec![doc! { "$match" : doc! { "operationType" : "insert" } }];
-    watch_and_update(collection, pipeline, from, to).await;
+    watch_and_update(collection, pipeline, from, to, update).await;
 }
 
-async fn consume_updated(collection: Collection<Data>, from: Status, to: Status) {
-    let from_status = bson::ser::to_document(&from).unwrap();
-    let name = from_status.get("tag").unwrap();
+async fn consume_updated(
+    collection: Collection<Data>,
+    from: StatusQuery,
+    to: StatusQuery,
+    update: Status,
+) {
+    let from_status = bson::ser::to_bson(&from).unwrap();
+    let name = from_status;
     let pipeline = vec![doc! {
     "$match": {
                  "$and": [
@@ -113,14 +132,15 @@ async fn consume_updated(collection: Collection<Data>, from: Status, to: Status)
                  ]
          }
       }];
-    watch_and_update(collection, pipeline, from, to).await;
+    watch_and_update(collection, pipeline, from, to, update).await;
 }
 
 async fn watch_and_update(
     collection: Collection<Data>,
     pipeline: Vec<Document>,
-    _from: Status,
-    to: Status,
+    _from: StatusQuery,
+    to: StatusQuery,
+    update: Status,
 ) {
     let full_doc = Some(FullDocumentType::UpdateLookup);
     let opts = ChangeStreamOptions::builder()
@@ -136,7 +156,7 @@ async fn watch_and_update(
             event.full_document
         );
         let mut updated = event.full_document.unwrap();
-        updated.status = to.clone();
+        updated.status = update.clone();
         let updated_document = bson::to_document(&updated).unwrap();
         let query = doc! { "_id" : updated.id.clone() };
         let updated = doc! {
@@ -177,7 +197,9 @@ async fn main() {
         "consumer1" => {
             consume_created(
                 collection,
-                Status::Pending(Desitnation("".to_string())),
+                StatusQuery::Pending,
+                StatusQuery::Approved,
+                // Status::Pending(Desitnation("".to_string())),
                 Status::Approved(Approver("approver".to_string())),
             )
             .await
@@ -185,12 +207,22 @@ async fn main() {
         "consumer2" => {
             consume_updated(
                 collection,
-                Status::Approved(Approver("approver".to_string())),
+                StatusQuery::Approved,
+                StatusQuery::Sent,
+                // Status::Approved(Approver("approver".to_string())),
                 Status::Sent,
             )
             .await
         }
-        "consumer3" => consume_updated(collection, Status::Sent, Status::Finalized).await,
+        "consumer3" => {
+            consume_updated(
+                collection,
+                StatusQuery::Sent,
+                StatusQuery::Finalized,
+                Status::Finalized,
+            )
+            .await
+        }
         _ => panic!("Invalid type provided."),
     }
 }
