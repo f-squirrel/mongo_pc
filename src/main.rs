@@ -4,12 +4,15 @@ use futures_util::stream::StreamExt;
 
 use mongodb::{
     bson::{self, bson, doc, oid::ObjectId, Document},
+    options::{ChangeStreamOptions, FullDocumentBeforeChangeType, FullDocumentType},
     Collection,
 };
 // use mongodb::change_stream::
 
 use structopt::StructOpt;
 use tokio::time;
+
+const UPDATES_NUM: usize = 100;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "example", about = "An example of StructOpt usage.")]
@@ -33,31 +36,34 @@ struct Data {
 }
 
 async fn produce(collection: Collection<Data>) {
+    time::sleep(time::Duration::from_secs(10)).await;
     log::info!("Producing data");
     // produce
-    for _i in 0..100000 {
+    for _i in 0..UPDATES_NUM {
         let data = Data {
             _id: ObjectId::new(),
             status: Status::Pending,
         };
         collection.insert_one(data, None).await.unwrap();
+        log::info!("Produced {_i}");
     }
     log::info!("Data produced");
 }
 
 async fn consume_created(collection: Collection<Data>, from: Status, to: Status) {
-    let pipeline = vec![doc! { "$match" : doc! { "operationType" : "update" } }];
+    let pipeline = vec![doc! { "$match" : doc! { "operationType" : "insert" } }];
     watch_and_update(collection, pipeline, from, to).await;
 }
 
 async fn consume_updated(collection: Collection<Data>, from: Status, to: Status) {
     let pipeline = vec![doc! {
     "$match": {
-                // doc!{ "operationType": "update" }
                  "$and": [
                 //  { "updateDescription.updatedFields.status": { "$eq": bson::to_document(&from).unwrap() } },
-                 { "updateDescription.updatedFields.status": { "$exists": true } },
-                 { "operationType": "update" }]
+                //  { "updateDescription.updatedFields.status": { "$exists": true } },
+                 { "operationType": "update" },
+                //  { "fullDocument": "updateLookup"}
+                 ]
          }
       }];
     watch_and_update(collection, pipeline, from, to).await;
@@ -69,7 +75,11 @@ async fn watch_and_update(
     from: Status,
     to: Status,
 ) {
-    let mut update_change_stream = collection.watch(pipeline, None).await.unwrap();
+    let full_doc = Some(FullDocumentType::UpdateLookup);
+    let opts = ChangeStreamOptions::builder()
+        .full_document(full_doc)
+        .build();
+    let mut update_change_stream = collection.watch(pipeline, opts).await.unwrap();
     log::info!("Watching for updates");
     let mut i = 0;
     while let Some(event) = update_change_stream.next().await.transpose().unwrap() {
@@ -88,6 +98,10 @@ async fn watch_and_update(
         log::info!("Document updated: {:?}", updated);
         collection.update_one(query, updated, None).await.unwrap();
         i += 1;
+        if i >= UPDATES_NUM {
+            log::info!("Processed all updates");
+            break;
+        }
     }
 }
 
@@ -95,11 +109,16 @@ async fn watch_and_update(
 async fn main() {
     env_logger::init();
 
-    time::sleep(time::Duration::from_secs(10)).await;
-
     let client = mongodb::Client::with_uri_str("mongodb://mongodb:27017")
         .await
         .unwrap();
+
+    let db = client.database("admin");
+    while let Err(error) = db.run_command(doc! {"replSetGetStatus": 1}, None).await {
+        log::info!("Waiting for MongoDB to be ready, error: {error:?}");
+        time::sleep(time::Duration::from_secs(1)).await;
+    }
+
     let db = client.database("db_data");
     let collection = db.collection::<Data>("data");
 
