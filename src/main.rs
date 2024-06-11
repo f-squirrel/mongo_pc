@@ -12,7 +12,7 @@ use structopt::StructOpt;
 use tokio::time;
 
 const UPDATES_NUM: usize = 100000;
-const PRODUCE_SLEEP: Option<Duration> = Some(Duration::from_millis(100));
+const PRODUCE_SLEEP: Option<Duration> = Some(Duration::from_millis(50));
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "example", about = "An example of StructOpt usage.")]
@@ -57,7 +57,7 @@ struct Receiver(String);
 enum Status {
     Pending(Desitnation),
     Approved(Approver),
-    Sent,
+    Processed,
     Finalized,
 }
 
@@ -66,7 +66,7 @@ enum Status {
 enum StatusQuery {
     Pending,
     Approved,
-    Sent,
+    Processed,
     Finalized,
 }
 
@@ -147,7 +147,7 @@ async fn watch_and_update(
     collection: Collection<Data>,
     pipeline: Vec<Document>,
     _from: StatusQuery,
-    to: StatusQuery,
+    _to: StatusQuery,
     update: Status,
 ) {
     let full_doc = Some(FullDocumentType::UpdateLookup);
@@ -158,7 +158,7 @@ async fn watch_and_update(
     log::info!("Watching for updates");
     let mut i = 0;
     while let Some(event) = update_change_stream.next().await.transpose().unwrap() {
-        log::info!(
+        log::debug!(
             "Update performed: {:?}, full document: {:?}",
             event.update_description,
             event.full_document
@@ -170,11 +170,11 @@ async fn watch_and_update(
         let updated = doc! {
             "$set": updated_document
         };
-        log::info!("Document updated: {:?}", updated);
+        log::debug!("Document updated: {:?}", updated);
         collection.update_one(query, updated, None).await.unwrap();
         i += 1;
         if i >= UPDATES_NUM {
-            log::info!("Processed all updates");
+            log::debug!("Processed all updates");
             break;
         }
     }
@@ -216,16 +216,16 @@ async fn main() {
             consume_updated(
                 collection,
                 StatusQuery::Approved,
-                StatusQuery::Sent,
+                StatusQuery::Processed,
                 // Status::Approved(Approver("approver".to_string())),
-                Status::Sent,
+                Status::Processed,
             )
             .await
         }
         "consumer3" => {
             consume_updated(
                 collection,
-                StatusQuery::Sent,
+                StatusQuery::Processed,
                 StatusQuery::Finalized,
                 Status::Finalized,
             )
