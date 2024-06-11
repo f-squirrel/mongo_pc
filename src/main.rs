@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use futures_util::stream::StreamExt;
 
 use derive_getters::Getters;
@@ -10,6 +12,7 @@ use structopt::StructOpt;
 use tokio::time;
 
 const UPDATES_NUM: usize = 100000;
+const PRODUCE_SLEEP: Option<Duration> = Some(Duration::from_millis(100));
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "example", about = "An example of StructOpt usage.")]
@@ -95,14 +98,19 @@ async fn produce(collection: Collection<Data>) {
     time::sleep(time::Duration::from_secs(10)).await;
     log::info!("Producing data");
     // produce
+    let start = time::Instant::now();
     for _i in 0..UPDATES_NUM {
         let data = Data::new("data".to_string());
         let updated_document = bson::to_document(&data).unwrap();
         log::info!("Producing data: {:?}", updated_document);
         collection.insert_one(data, None).await.unwrap();
         log::info!("Produced {_i}");
+        if let Some(sleep) = PRODUCE_SLEEP {
+            time::sleep(sleep).await;
+        }
     }
-    log::info!("Data produced");
+    let elapsed = start.elapsed();
+    log::info!("Data produced, elapsed: {:?}", elapsed);
 }
 
 async fn consume_created(
