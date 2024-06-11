@@ -13,20 +13,35 @@ const UPDATES_NUM: usize = 100000;
 #[derive(Debug, StructOpt)]
 #[structopt(name = "example", about = "An example of StructOpt usage.")]
 struct Opt {
-    #[structopt(short = "t", long = "type", possible_values = &["producer", "consumer1", "consumer2"])]
+    #[structopt(short = "t", long = "type", possible_values = &["producer", "consumer1", "consumer2", "consumer3"])]
     type_: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct Cid(String);
+
+impl From<uuid::Uuid> for Cid {
+    fn from(uuid: uuid::Uuid) -> Self {
+        Cid(uuid.to_string())
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum Status {
     Pending,
     Approved,
+    Sent,
     Finalized,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Data {
-    _id: ObjectId,
+    // DD: Do not change it anywhere after creation
+    #[serde(rename = "_id")]
+    id: ObjectId,
+
+    cid: Cid,
+    payload: String,
     status: Status,
 }
 
@@ -36,7 +51,9 @@ async fn produce(collection: Collection<Data>) {
     // produce
     for _i in 0..UPDATES_NUM {
         let data = Data {
-            _id: ObjectId::new(),
+            id: ObjectId::new(),
+            payload: "data".to_string(),
+            cid: uuid::Uuid::new_v4().into(),
             status: Status::Pending,
         };
         collection.insert_one(data, None).await.unwrap();
@@ -51,11 +68,11 @@ async fn consume_created(collection: Collection<Data>, from: Status, to: Status)
 }
 
 async fn consume_updated(collection: Collection<Data>, from: Status, to: Status) {
+    let from_status = bson::ser::to_bson(&from).unwrap();
     let pipeline = vec![doc! {
     "$match": {
                  "$and": [
-                //  { "updateDescription.updatedFields.status": { "$eq": bson::to_document(&from).unwrap() } },
-                //  { "updateDescription.updatedFields.status": { "$exists": true } },
+                 { "updateDescription.updatedFields.status": { "$eq":  from_status } },
                  { "operationType": "update" },
                  ]
          }
@@ -85,7 +102,7 @@ async fn watch_and_update(
         let mut updated = event.full_document.unwrap();
         updated.status = to.clone();
         let updated_document = bson::to_document(&updated).unwrap();
-        let query = doc! { "_id" : updated_document.get("_id").unwrap() };
+        let query = doc! { "_id" : updated.id.clone() };
         let updated = doc! {
             "$set": updated_document
         };
@@ -122,7 +139,8 @@ async fn main() {
     match opt.type_.as_str() {
         "producer" => produce(collection).await,
         "consumer1" => consume_created(collection, Status::Pending, Status::Approved).await,
-        "consumer2" => consume_updated(collection, Status::Approved, Status::Finalized).await,
+        "consumer2" => consume_updated(collection, Status::Approved, Status::Sent).await,
+        "consumer3" => consume_updated(collection, Status::Sent, Status::Finalized).await,
         _ => panic!("Invalid type provided."),
     }
 }

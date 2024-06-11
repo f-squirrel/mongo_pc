@@ -83,3 +83,18 @@ services:
     entrypoint: target/debug/mongo_tput -t consumer2
     depends_on:
       - mongodb
+
+  consumer3:
+    image: mongo_tput:lastest
+    init: true
+    hostname: consumer3
+    volumes:
+      - ./:/consumer3
+    environment:
+      - RUST_BACKTRACE=full
+      - RUST_LOG=info
+    user: "${UID}:${GID}"
+    working_dir: /consumer3
+    entrypoint: target/debug/mongo_tput -t consumer3
+    depends_on:
+      - mongodb
