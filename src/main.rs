@@ -1,5 +1,6 @@
 use futures_util::stream::StreamExt;
 
+use derive_getters::Getters;
 use mongodb::{
     bson::{self, doc, oid::ObjectId, Document},
     options::{ChangeStreamOptions, FullDocumentType},
@@ -34,9 +35,10 @@ enum Status {
     Finalized,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Getters)]
 struct Data {
-    // DD: Do not change it anywhere after creation
+    // DD: Do not change it anywhere after creation.
+    // We need it to be able to safely update objects
     #[serde(rename = "_id")]
     id: ObjectId,
 
@@ -45,17 +47,23 @@ struct Data {
     status: Status,
 }
 
+impl Data {
+    pub(crate) fn new(payload: String) -> Self {
+        Data {
+            id: ObjectId::new(),
+            cid: uuid::Uuid::new_v4().into(),
+            payload,
+            status: Status::Pending,
+        }
+    }
+}
+
 async fn produce(collection: Collection<Data>) {
     time::sleep(time::Duration::from_secs(10)).await;
     log::info!("Producing data");
     // produce
     for _i in 0..UPDATES_NUM {
-        let data = Data {
-            id: ObjectId::new(),
-            payload: "data".to_string(),
-            cid: uuid::Uuid::new_v4().into(),
-            status: Status::Pending,
-        };
+        let data = Data::new("data".to_string());
         collection.insert_one(data, None).await.unwrap();
         log::info!("Produced {_i}");
     }
