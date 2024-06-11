@@ -28,14 +28,38 @@ impl From<uuid::Uuid> for Cid {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct Approver(String);
+
+impl From<String> for Approver {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct Sender(String);
+
+impl From<String> for Sender {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct Receiver(String);
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "tag", content = "content")]
 enum Status {
-    Pending,
-    Approved,
+    Pending(Sender),
+    Approved(Approver),
     Sent,
     Finalized,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Getters)]
+#[serde(rename_all = "snake_case")]
 struct Data {
     // DD: Do not change it anywhere after creation.
     // We need it to be able to safely update objects
@@ -53,7 +77,7 @@ impl Data {
             id: ObjectId::new(),
             cid: uuid::Uuid::new_v4().into(),
             payload,
-            status: Status::Pending,
+            status: Status::Pending(Sender("sender".to_string())),
         }
     }
 }
@@ -64,6 +88,8 @@ async fn produce(collection: Collection<Data>) {
     // produce
     for _i in 0..UPDATES_NUM {
         let data = Data::new("data".to_string());
+        let updated_document = bson::to_document(&data).unwrap();
+        log::info!("Producing data: {:?}", updated_document);
         collection.insert_one(data, None).await.unwrap();
         log::info!("Produced {_i}");
     }
@@ -76,11 +102,13 @@ async fn consume_created(collection: Collection<Data>, from: Status, to: Status)
 }
 
 async fn consume_updated(collection: Collection<Data>, from: Status, to: Status) {
-    let from_status = bson::ser::to_bson(&from).unwrap();
+    let from_status = bson::ser::to_document(&from).unwrap();
+    let name = from_status.get("tag").unwrap();
     let pipeline = vec![doc! {
     "$match": {
                  "$and": [
-                 { "updateDescription.updatedFields.status": { "$eq":  from_status } },
+                 // DD: for simple cases, when status is a value
+                 { "updateDescription.updatedFields.status.tag": { "$eq":  name } },
                  { "operationType": "update" },
                  ]
          }
@@ -146,8 +174,22 @@ async fn main() {
     let opt = Opt::from_args();
     match opt.type_.as_str() {
         "producer" => produce(collection).await,
-        "consumer1" => consume_created(collection, Status::Pending, Status::Approved).await,
-        "consumer2" => consume_updated(collection, Status::Approved, Status::Sent).await,
+        "consumer1" => {
+            consume_created(
+                collection,
+                Status::Pending(Sender("".to_string())),
+                Status::Approved(Approver("approver".to_string())),
+            )
+            .await
+        }
+        "consumer2" => {
+            consume_updated(
+                collection,
+                Status::Approved(Approver("approver".to_string())),
+                Status::Sent,
+            )
+            .await
+        }
         "consumer3" => consume_updated(collection, Status::Sent, Status::Finalized).await,
         _ => panic!("Invalid type provided."),
     }
