@@ -49,9 +49,6 @@ impl From<String> for Desitnation {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct Receiver(String);
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "tag", content = "content")]
 enum Status {
