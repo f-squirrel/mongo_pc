@@ -37,9 +37,9 @@ impl From<String> for Approver {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct Sender(String);
+struct Desitnation(String);
 
-impl From<String> for Sender {
+impl From<String> for Desitnation {
     fn from(s: String) -> Self {
         Self(s)
     }
@@ -52,7 +52,7 @@ struct Receiver(String);
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "tag", content = "content")]
 enum Status {
-    Pending(Sender),
+    Pending(Desitnation),
     Approved(Approver),
     Sent,
     Finalized,
@@ -77,7 +77,7 @@ impl Data {
             id: ObjectId::new(),
             cid: uuid::Uuid::new_v4().into(),
             payload,
-            status: Status::Pending(Sender("sender".to_string())),
+            status: Status::Pending(Desitnation("sender".to_string())),
         }
     }
 }
@@ -177,7 +177,7 @@ async fn main() {
         "consumer1" => {
             consume_created(
                 collection,
-                Status::Pending(Sender("".to_string())),
+                Status::Pending(Desitnation("".to_string())),
                 Status::Approved(Approver("approver".to_string())),
             )
             .await
