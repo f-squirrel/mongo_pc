@@ -1,23 +1,18 @@
-use std::os::unix::raw::mode_t;
-
 use futures_util::stream::StreamExt;
 
 use mongodb::{
-    bson::{self, bson, doc, oid::ObjectId, Document},
-    options::{ChangeStreamOptions, FullDocumentBeforeChangeType, FullDocumentType},
+    bson::{self, doc, oid::ObjectId, Document},
+    options::{ChangeStreamOptions, FullDocumentType},
     Collection,
 };
-// use mongodb::change_stream::
-
 use structopt::StructOpt;
 use tokio::time;
 
-const UPDATES_NUM: usize = 100;
+const UPDATES_NUM: usize = 100000;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "example", about = "An example of StructOpt usage.")]
 struct Opt {
-    /// Set type
     #[structopt(short = "t", long = "type", possible_values = &["producer", "consumer1", "consumer2"])]
     type_: String,
 }
@@ -62,7 +57,6 @@ async fn consume_updated(collection: Collection<Data>, from: Status, to: Status)
                 //  { "updateDescription.updatedFields.status": { "$eq": bson::to_document(&from).unwrap() } },
                 //  { "updateDescription.updatedFields.status": { "$exists": true } },
                  { "operationType": "update" },
-                //  { "fullDocument": "updateLookup"}
                  ]
          }
       }];
@@ -72,7 +66,7 @@ async fn consume_updated(collection: Collection<Data>, from: Status, to: Status)
 async fn watch_and_update(
     collection: Collection<Data>,
     pipeline: Vec<Document>,
-    from: Status,
+    _from: Status,
     to: Status,
 ) {
     let full_doc = Some(FullDocumentType::UpdateLookup);

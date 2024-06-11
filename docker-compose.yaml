@@ -8,24 +8,12 @@ services:
     hostname: mongodb
     user: "${UID}:${GID}"
     command: ["sh", "-c", "mongod --replSet rs0 --bind_ip_all --port 27017"]
-    # command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
-    # extra_hosts:
-    #   - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "sh", "-c", "echo 'try { rs.status() } catch (e) { rs.initiate({_id: \"rs0\", members: [{_id: 0, host: \"mongodb:27017\"}]}) }' | mongosh --quiet --port 27017"]
       interval: 1s
       timeout: 10s
       start_period: 0s
       retries: 5
-    # healthcheck:
-    #   test: echo "try { rs.status() } catch (err) {!rs.initiate({_id:\"rs0\",members:[{_id:0,host:\"mongodb:27017\"]})}" | mongosh --port 27017 --quiet
-    #   # test: test $$(mongosh --port 27017 --quiet --eval "try {rs.initiate({_id:'rs0',members:[{_id:0,host:\"mongo:27017\"}]})} catch(e) {rs.status().ok}") -eq 1
-    #   # test: test $$(echo "rs.initiate({_id:'rs0',members:[{_id:0,host:\"mongodb1:27017\"}]}).ok || rs.status().ok" | mongosh --port 27017 --quiet) -eq 1
-    #   interval: 1s
-    #   timeout: 30s
-    #   start_period: 0s
-    # #   # start_interval: 1s
-      # retries: 0s
     ports:
       - 27017:27017
     attach: true
@@ -46,7 +34,7 @@ services:
       - ./:/producer
     environment:
       - RUST_BACKTRACE=1
-      - RUST_LOG=debug
+      - RUST_LOG=info
     # networks:
     #   inner:
     #     ipv4_address: 2.2.2.60
@@ -73,15 +61,8 @@ services:
       - ./:/consumer1
     environment:
       - RUST_BACKTRACE=1
-      - RUST_LOG=debug
-    # networks:
-    #   inner:
-    #     ipv4_address: 2.2.2.60
-      # runtools_cluster_net:
-        # ipv4_address: 1.1.1.60
+      - RUST_LOG=info
     user: "${UID}:${GID}"
-    # ports:
-    #   - 8082:8080
     working_dir: /consumer1
     entrypoint: target/debug/mongo_tput -t consumer1
     depends_on:
@@ -92,25 +73,12 @@ services:
     image: mongo_tput:lastest
     init: true
     hostname: consumer2
-    # # For memory profiling
-    # security_opt:
-    #   - seccomp:unconfined
-    # # For gdb in a container
-    # cap_add:
-    #   - SYS_PTRACE
     volumes:
       - ./:/consumer2
     environment:
       - RUST_BACKTRACE=full
-      - RUST_LOG=debug
-    # networks:
-    #   inner:
-    #     ipv4_address: 2.2.2.60
-      # runtools_cluster_net:
-        # ipv4_address: 1.1.1.60
+      - RUST_LOG=info
     user: "${UID}:${GID}"
-    # ports:
-    #   - 8082:8080
     working_dir: /consumer2
     entrypoint: target/debug/mongo_tput -t consumer2
     depends_on:
