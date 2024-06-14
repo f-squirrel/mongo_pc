@@ -15,6 +15,7 @@ use tokio::time;
 
 const UPDATES_NUM: usize = 100000;
 const PRODUCE_SLEEP: Option<Duration> = Some(Duration::from_millis(50));
+const PAYLOAD_SIZE_BYTES: usize = 1024;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "mongo_tput", about = "Mongo throughput test")]
@@ -116,7 +117,8 @@ async fn produce(collection: Collection<Request>) {
     // produce
     let start = time::Instant::now();
     for _i in 0..UPDATES_NUM {
-        let data = Request::new("data".to_string());
+        let payload = generate_string_of_byte_length(PAYLOAD_SIZE_BYTES);
+        let data = Request::new(payload);
         let updated_document = bson::to_document(&data).unwrap();
         log::info!("Producing data: {:?}", updated_document);
         collection.insert_one(data, None).await.unwrap();
@@ -200,6 +202,17 @@ async fn watch_and_update(
             break;
         }
     }
+}
+
+fn generate_string_of_byte_length(byte_length: usize) -> String {
+    // The sequence to repeat
+    const SEQUENCE: &str = "DEADBEEF";
+    // Repeat the sequence enough times to exceed the desired byte length
+    let repeated_sequence = SEQUENCE.repeat((byte_length / SEQUENCE.len()) + 1);
+    // Truncate the string to the exact byte length required
+    let result = &repeated_sequence[..byte_length];
+
+    result.to_string()
 }
 
 #[tokio::main]
