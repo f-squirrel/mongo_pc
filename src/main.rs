@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use futures_util::stream::StreamExt;
 
+use chrono::serde::ts_milliseconds;
 use derive_getters::Getters;
+
 use mongodb::{
     bson::{self, doc, oid::ObjectId, Document},
     options::{ChangeStreamOptions, FullDocumentType},
@@ -69,35 +71,51 @@ enum StatusQuery {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Getters)]
 #[serde(rename_all = "snake_case")]
-struct Data {
-    // DD: Do not change it anywhere after creation.
-    // We need it to be able to safely update objects
-    #[serde(rename = "_id")]
+// #[derive(new)]
+struct Request {
+    // Internal data, not exposed to the outside users.
+    // It shall be used only for internal purposes.
+    #[getter(skip)]
     id: ObjectId,
+
+    #[serde(with = "ts_milliseconds")]
+    accepted_at: chrono::DateTime<chrono::Utc>,
 
     cid: Cid,
     payload: String,
     status: Status,
 }
 
-impl Data {
-    pub(crate) fn new(payload: String) -> Self {
-        Data {
+impl Request {
+    pub(crate) fn new(payload: impl Into<String>) -> Self {
+        Request {
             id: ObjectId::new(),
             cid: uuid::Uuid::new_v4().into(),
-            payload,
+            accepted_at: chrono::Utc::now(),
+            payload: payload.into(),
+            status: Status::Pending(Desitnation("sender".to_string())),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn with_cid(cid: impl Into<Cid>, payload: impl Into<String>) -> Self {
+        Request {
+            id: ObjectId::new(),
+            cid: cid.into(),
+            accepted_at: chrono::Utc::now(),
+            payload: payload.into(),
             status: Status::Pending(Desitnation("sender".to_string())),
         }
     }
 }
 
-async fn produce(collection: Collection<Data>) {
+async fn produce(collection: Collection<Request>) {
     time::sleep(time::Duration::from_secs(10)).await;
     log::info!("Producing data");
     // produce
     let start = time::Instant::now();
     for _i in 0..UPDATES_NUM {
-        let data = Data::new("data".to_string());
+        let data = Request::new("data".to_string());
         let updated_document = bson::to_document(&data).unwrap();
         log::info!("Producing data: {:?}", updated_document);
         collection.insert_one(data, None).await.unwrap();
@@ -111,7 +129,7 @@ async fn produce(collection: Collection<Data>) {
 }
 
 async fn consume_created(
-    collection: Collection<Data>,
+    collection: Collection<Request>,
     from: StatusQuery,
     to: StatusQuery,
     update: Status,
@@ -121,7 +139,7 @@ async fn consume_created(
 }
 
 async fn consume_updated(
-    collection: Collection<Data>,
+    collection: Collection<Request>,
     from: StatusQuery,
     to: StatusQuery,
     update: Status,
@@ -141,7 +159,7 @@ async fn consume_updated(
 }
 
 async fn watch_and_update(
-    collection: Collection<Data>,
+    collection: Collection<Request>,
     pipeline: Vec<Document>,
     _from: StatusQuery,
     _to: StatusQuery,
@@ -192,7 +210,7 @@ async fn main() {
     }
 
     let db = client.database("db_data");
-    let collection = db.collection::<Data>("data");
+    let collection = db.collection::<Request>("data");
 
     log::info!("Connected to MongoDB");
 
