@@ -76,6 +76,7 @@ struct Request {
     // Internal data, not exposed to the outside users.
     // It shall be used only for internal purposes.
     #[getter(skip)]
+    #[serde(rename = "_id")]
     id: ObjectId,
 
     #[serde(with = "ts_milliseconds")]
