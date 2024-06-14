@@ -181,7 +181,7 @@ async fn watch_and_update(
         let mut updated = event.full_document.unwrap();
         updated.status = update.clone();
         let updated_document = bson::to_document(&updated).unwrap();
-        let query = doc! { "_id" : updated.id.clone() };
+        let query = doc! { "_id" : updated.id };
         let updated = doc! {
             "$set": updated_document
         };
