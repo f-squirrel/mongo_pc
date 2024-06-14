@@ -178,8 +178,14 @@ async fn watch_and_update(
             event.update_description,
             event.full_document
         );
+
+        // DD: Place holder for the actual business logic - START
+
         let mut updated = event.full_document.unwrap();
         updated.status = update.clone();
+
+        // DD: Place holder for the actual business logic - END
+
         let updated_document = bson::to_document(&updated).unwrap();
         let query = doc! { "_id" : updated.id };
         let updated = doc! {
