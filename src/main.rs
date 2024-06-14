@@ -17,7 +17,7 @@ const UPDATES_NUM: usize = 100000;
 const PRODUCE_SLEEP: Option<Duration> = Some(Duration::from_millis(50));
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "example", about = "An example of StructOpt usage.")]
+#[structopt(name = "mongo_tput", about = "Mongo throughput test")]
 struct Opt {
     #[structopt(short = "t", long = "type", possible_values = &["producer", "consumer1", "consumer2", "consumer3"])]
     type_: String,
