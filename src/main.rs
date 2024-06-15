@@ -22,6 +22,8 @@ const PAYLOAD_SIZE_BYTES: usize = 1024;
 struct Opt {
     #[structopt(short = "t", long = "type", possible_values = &["producer", "consumer1", "consumer2", "consumer3"])]
     type_: String,
+    #[structopt(short = "m", long = "mongo", default_value = "mongodb://mongodb:27017")]
+    mongo_uri: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -114,15 +116,14 @@ impl Request {
 async fn produce(collection: Collection<Request>) {
     time::sleep(time::Duration::from_secs(10)).await;
     log::info!("Producing data");
-    // produce
     let start = time::Instant::now();
-    for _i in 0..UPDATES_NUM {
+    for i in 0..UPDATES_NUM {
         let payload = generate_string_of_byte_length(PAYLOAD_SIZE_BYTES);
         let data = Request::new(payload);
         let updated_document = bson::to_document(&data).unwrap();
         log::info!("Producing data: {:?}", updated_document);
         collection.insert_one(data, None).await.unwrap();
-        log::info!("Produced {_i}");
+        log::info!("Produced {i}");
         if let Some(sleep) = PRODUCE_SLEEP {
             time::sleep(sleep).await;
         }
@@ -219,7 +220,8 @@ fn generate_string_of_byte_length(byte_length: usize) -> String {
 async fn main() {
     env_logger::init();
 
-    let client = mongodb::Client::with_uri_str("mongodb://mongodb:27017")
+    let opt = Opt::from_args();
+    let client = mongodb::Client::with_uri_str(opt.mongo_uri.as_str())
         .await
         .unwrap();
 
@@ -234,7 +236,6 @@ async fn main() {
 
     log::info!("Connected to MongoDB");
 
-    let opt = Opt::from_args();
     match opt.type_.as_str() {
         "producer" => produce(collection).await,
         "consumer1" => {
