@@ -1,4 +1,7 @@
-use std::time::Duration;
+use std::{
+    collections::{BTreeSet, HashSet},
+    time::Duration,
+};
 
 use futures_util::stream::StreamExt;
 
@@ -13,7 +16,10 @@ use mongodb::{
 use structopt::StructOpt;
 use tokio::time;
 
-const UPDATES_NUM: usize = 100000;
+const UPDATES_NUM: usize = 1000;
+// const PRODUCE_DELAY: Option<Duration> = Some(time::Duration::from_secs(10));
+const PRODUCE_DELAY: Option<Duration> = None;
+const CONSUME_DELAY: Option<Duration> = Some(time::Duration::from_secs(10));
 const PRODUCE_SLEEP: Option<Duration> = Some(Duration::from_millis(50));
 const PAYLOAD_SIZE_BYTES: usize = 1024;
 
@@ -114,7 +120,10 @@ impl Request {
 }
 
 async fn produce(collection: Collection<Request>) {
-    time::sleep(time::Duration::from_secs(10)).await;
+    if let Some(delay) = PRODUCE_DELAY {
+        log::info!("Delaying producer for {:?}", delay);
+        time::sleep(delay).await;
+    }
     log::info!("Producing data");
     let start = time::Instant::now();
     for i in 0..UPDATES_NUM {
@@ -169,12 +178,37 @@ async fn watch_and_update(
     _to: StatusQuery,
     update: Status,
 ) {
+    if let Some(delay) = CONSUME_DELAY {
+        log::info!("Delaying consumer for {:?}", delay);
+        time::sleep(delay).await;
+    }
+
     let full_doc = Some(FullDocumentType::UpdateLookup);
     let opts = ChangeStreamOptions::builder()
         .full_document(full_doc)
         .build();
+
+    let mut hash_set = HashSet::new();
+    let mut ord_set = BTreeSet::new();
+
     let mut update_change_stream = collection.watch(pipeline, opts).await.unwrap();
     log::info!("Watching for updates");
+
+    let from_status = bson::ser::to_bson(&_from).unwrap();
+    let name = from_status;
+    let filter = doc! {"status.tag": name};
+    let mut pre_watched_data = collection.find(filter, None).await.unwrap();
+
+    let mut i = 0;
+    while let Some(doc) = pre_watched_data.next().await.transpose().unwrap() {
+        hash_set.insert(doc.id);
+        ord_set.insert(doc.accepted_at);
+        update_status(doc, update.clone(), collection.clone()).await;
+        i += 1;
+    }
+
+    log::info!("Pre-watched data updated: {:?}", i);
+
     let mut i = 0;
     while let Some(event) = update_change_stream.next().await.transpose().unwrap() {
         log::debug!(
@@ -185,24 +219,62 @@ async fn watch_and_update(
 
         // DD: Place holder for the actual business logic - START
 
-        let mut updated = event.full_document.unwrap();
-        updated.status = update.clone();
+        let updated = event.full_document.unwrap();
+        if let Some(id) = hash_set.get(&updated.id) {
+            log::info!(
+                "Already processed: {:?}, hash_set size: {}",
+                id,
+                hash_set.len()
+            );
+            continue;
+        }
+        if let Some(last) = ord_set.last() {
+            //
+            if updated.accepted_at > *last + chrono::Duration::milliseconds(10) {
+                log::info!(
+                    "Resetting the ord_set and hash_set, last: {:?}, current: {:?}",
+                    last,
+                    updated.accepted_at
+                );
+                ord_set.clear();
+                hash_set.clear();
+            }
+        }
+        if let Some(accepted_at) = ord_set.get(&updated.accepted_at) {
+            log::info!(
+                "Already processed: {:?}, ord_set size: {}",
+                accepted_at,
+                ord_set.len()
+            );
+            continue;
+        }
+        update_status(updated, update.clone(), collection.clone()).await;
 
-        // DD: Place holder for the actual business logic - END
-
-        let updated_document = bson::to_document(&updated).unwrap();
-        let query = doc! { "_id" : updated.id };
-        let updated = doc! {
-            "$set": updated_document
-        };
-        log::debug!("Document updated: {:?}", updated);
-        collection.update_one(query, updated, None).await.unwrap();
         i += 1;
         if i >= UPDATES_NUM {
-            log::debug!("Processed all updates");
+            log::info!("Processed all updates");
             break;
         }
     }
+    log::info!("Consumed {i}, no more updates");
+}
+
+async fn update_status(
+    mut to_update: Request,
+    update: Status,
+    collection: Collection<Request>,
+) -> Request {
+    to_update.status = update;
+
+    let updated_document = bson::to_document(&to_update).unwrap();
+    let query = doc! { "_id" : to_update.id };
+    let updated = doc! {
+        "$set": updated_document
+    };
+    log::debug!("Document updated: {:?}", updated);
+    collection.update_one(query, updated, None).await.unwrap();
+
+    to_update
 }
 
 fn generate_string_of_byte_length(byte_length: usize) -> String {
