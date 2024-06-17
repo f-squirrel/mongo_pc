@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeSet, HashSet},
-    time::Duration,
-};
+use std::{collections::HashSet, time::Duration};
 
 use futures_util::stream::StreamExt;
 
@@ -32,7 +29,7 @@ struct Opt {
     mongo_uri: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
 struct Cid(String);
 
 impl From<uuid::Uuid> for Cid {
@@ -84,9 +81,9 @@ enum StatusQuery {
 struct Request {
     // Internal data, not exposed to the outside users.
     // It shall be used only for internal purposes.
-    #[getter(skip)]
+    // #[getter(skip)]
     #[serde(rename = "_id")]
-    id: ObjectId,
+    oid: ObjectId,
 
     #[serde(with = "ts_milliseconds")]
     accepted_at: chrono::DateTime<chrono::Utc>,
@@ -99,7 +96,7 @@ struct Request {
 impl Request {
     pub(crate) fn new(payload: impl Into<String>) -> Self {
         Request {
-            id: ObjectId::new(),
+            oid: ObjectId::new(),
             cid: uuid::Uuid::new_v4().into(),
             accepted_at: chrono::Utc::now(),
             payload: payload.into(),
@@ -110,7 +107,7 @@ impl Request {
     #[allow(dead_code)]
     pub(crate) fn with_cid(cid: impl Into<Cid>, payload: impl Into<String>) -> Self {
         Request {
-            id: ObjectId::new(),
+            oid: ObjectId::new(),
             cid: cid.into(),
             accepted_at: chrono::Utc::now(),
             payload: payload.into(),
@@ -189,7 +186,6 @@ async fn watch_and_update(
         .build();
 
     let mut hash_set = HashSet::new();
-    let mut ord_set = BTreeSet::new();
 
     let mut update_change_stream = collection.watch(pipeline, opts).await.unwrap();
     log::info!("Watching for updates");
@@ -201,8 +197,7 @@ async fn watch_and_update(
 
     let mut i = 0;
     while let Some(doc) = pre_watched_data.next().await.transpose().unwrap() {
-        hash_set.insert(doc.id);
-        ord_set.insert(doc.accepted_at);
+        hash_set.insert(doc.cid().to_owned());
         update_status(doc, update.clone(), collection.clone()).await;
         i += 1;
     }
@@ -220,33 +215,18 @@ async fn watch_and_update(
         // DD: Place holder for the actual business logic - START
 
         let updated = event.full_document.unwrap();
-        if let Some(id) = hash_set.get(&updated.id) {
-            log::info!(
-                "Already processed: {:?}, hash_set size: {}",
-                id,
-                hash_set.len()
-            );
-            continue;
-        }
-        if let Some(last) = ord_set.last() {
-            //
-            if updated.accepted_at > *last + chrono::Duration::milliseconds(10) {
+        if !hash_set.is_empty() {
+            if let Some(id) = hash_set.get(&updated.cid()) {
                 log::info!(
-                    "Resetting the ord_set and hash_set, last: {:?}, current: {:?}",
-                    last,
-                    updated.accepted_at
+                    "Already processed: {:?}, hash_set size: {}",
+                    id,
+                    hash_set.len()
                 );
-                ord_set.clear();
+                continue;
+            } else {
+                log::info!("No hash_set entry for: {:?}, clear cache", updated.cid());
                 hash_set.clear();
             }
-        }
-        if let Some(accepted_at) = ord_set.get(&updated.accepted_at) {
-            log::info!(
-                "Already processed: {:?}, ord_set size: {}",
-                accepted_at,
-                ord_set.len()
-            );
-            continue;
         }
         update_status(updated, update.clone(), collection.clone()).await;
 
@@ -267,7 +247,7 @@ async fn update_status(
     to_update.status = update;
 
     let updated_document = bson::to_document(&to_update).unwrap();
-    let query = doc! { "_id" : to_update.id };
+    let query = doc! { "_id" : to_update.oid() };
     let updated = doc! {
         "$set": updated_document
     };
