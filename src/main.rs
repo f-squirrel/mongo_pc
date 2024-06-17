@@ -146,7 +146,9 @@ async fn consume_created(
     to: StatusQuery,
     update: Status,
 ) {
-    let pipeline = vec![doc! { "$match" : doc! { "operationType" : "insert" } }];
+    let pipeline = vec![doc! {
+          "$match" : doc! { "operationType" : "insert" },
+    }];
     watch_and_update(collection, pipeline, from, to, update).await;
 }
 
@@ -159,14 +161,14 @@ async fn consume_updated(
     let from_status = bson::ser::to_bson(&from).unwrap();
     let name = from_status;
     let pipeline = vec![doc! {
-    "$match": {
-                 "$and": [
-                 // DD: for simple cases, when status is a value
-                 { "updateDescription.updatedFields.status.tag": { "$eq":  name } },
-                 { "operationType": "update" },
-                 ]
-         }
-      }];
+      "$match": {
+                   "$and": [
+                   // DD: for simple cases, when status is a value
+                   { "updateDescription.updatedFields.status.tag": { "$eq":  name } },
+                   { "operationType": "update" },
+                   ]
+           },
+    }];
     watch_and_update(collection, pipeline, from, to, update).await;
 }
 
@@ -197,8 +199,15 @@ async fn watch_and_update(
     let filter = doc! {"status.tag": name};
     let mut pre_watched_data = collection.find(filter, None).await.unwrap();
 
+    let mut ord_time = std::collections::BTreeSet::new();
     let mut i = 0;
     while let Some(doc) = pre_watched_data.next().await.transpose().unwrap() {
+        if let Some(accepted_at) = ord_time.last() {
+            if doc.accepted_at() < accepted_at {
+                log::warn!("Out of order data: {:?}", doc)
+            }
+        }
+        ord_time.insert(doc.accepted_at().to_owned());
         hash_set.insert(doc.cid().to_owned());
         update_status(doc, update.clone(), collection.clone()).await;
         i += 1;
@@ -217,6 +226,14 @@ async fn watch_and_update(
         // DD: Place holder for the actual business logic - START
 
         let updated = event.full_document.unwrap();
+
+        if let Some(accepted_at) = ord_time.last() {
+            if updated.accepted_at() < accepted_at {
+                log::warn!("Out of order data: {:?}", updated);
+            }
+        }
+        ord_time.insert(updated.accepted_at().to_owned());
+
         if !hash_set.is_empty() {
             if let Some(id) = hash_set.get(&updated.cid()) {
                 log::info!(
