@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     fmt::Debug,
+    hash,
     marker::{Send, Sync, Unpin},
     time::Duration,
 };
@@ -263,6 +264,7 @@ trait HandleUpdate {
     type R: RequestT;
     fn from(&self) -> &StatusQuery;
     fn to(&self) -> &StatusQuery;
+    #[must_use]
     async fn handle_update(&self, updated: Self::R) -> Self::R;
 }
 
@@ -282,6 +284,7 @@ impl HandleUpdate for DemoHandler {
         &self.to
     }
 
+    #[must_use]
     async fn handle_update(&self, mut updated: Request) -> Request {
         updated.status = self.update.clone();
         updated
@@ -307,6 +310,63 @@ where
         }
     }
 
+    async fn handle_update(
+        &self,
+        updated: R,
+        is_prewatched: bool,
+        hash_set: &mut HashSet<Cid>,
+        ord_time: &mut std::collections::BTreeSet<chrono::DateTime<chrono::Utc>>,
+    ) {
+        if let Some(accepted_at) = ord_time.last() {
+            if updated.accepted_at() < accepted_at {
+                log::warn!("Out of order data: {:?}", updated)
+            }
+        }
+
+        ord_time.insert(updated.accepted_at().to_owned());
+
+        if is_prewatched {
+            hash_set.insert(updated.cid().to_owned());
+        } else {
+            if hash_set.contains(updated.cid()) {
+                log::warn!("Duplicate data: {:?}", updated);
+                return;
+            } else {
+                log::info!("Clear hash cache, no duplicates");
+                hash_set.clear();
+            }
+        }
+
+        assert_eq!(
+            std::mem::discriminant(&updated.status().to_query()),
+            std::mem::discriminant(self.handler.from()),
+            "Received status: {:?}, expected: {:?}",
+            updated.status().to_query(),
+            self.handler.from(),
+        );
+
+        let updated = self.handler.handle_update(updated).await;
+
+        assert_eq!(
+            std::mem::discriminant(&updated.status().to_query()),
+            std::mem::discriminant(self.handler.to()),
+            "Updated to status: {:?}, expected: {:?}",
+            updated.status().to_query(),
+            self.handler.to(),
+        );
+
+        let updated_document = bson::to_document(&updated).unwrap();
+        let query = doc! { "_id" : updated.oid() };
+        let updated_doc = doc! {
+            "$set": updated_document
+        };
+        log::debug!("Document updated: {:?}", updated_doc);
+        self.collection
+            .update_one(query, updated_doc, None)
+            .await
+            .unwrap();
+    }
+
     async fn consume(&self) {
         let full_doc = Some(FullDocumentType::UpdateLookup);
         let opts = ChangeStreamOptions::builder()
@@ -329,14 +389,8 @@ where
         let mut hash_set = HashSet::new();
         let mut i = 0;
         while let Some(doc) = pre_watched_data.next().await.transpose().unwrap() {
-            if let Some(accepted_at) = ord_time.last() {
-                if doc.accepted_at() < accepted_at {
-                    log::warn!("Out of order data: {:?}", doc)
-                }
-            }
-            ord_time.insert(doc.accepted_at().to_owned());
-            hash_set.insert(doc.cid().to_owned());
-            self.handler.handle_update(doc).await;
+            self.handle_update(doc, true, &mut hash_set, &mut ord_time)
+                .await;
             i += 1;
         }
 
@@ -352,51 +406,8 @@ where
                 event.full_document
             );
             let updated = event.full_document.unwrap();
-
-            if let Some(accepted_at) = ord_time.last() {
-                if updated.accepted_at() < accepted_at {
-                    log::warn!("Out of order data: {:?}", updated)
-                }
-            }
-
-            ord_time.insert(updated.accepted_at().to_owned());
-
-            if hash_set.contains(updated.cid()) {
-                log::warn!("Duplicate data: {:?}", updated);
-                continue;
-            } else {
-                log::info!("Clear hash cache, no duplicates");
-                hash_set.clear();
-            }
-
-            assert_eq!(
-                std::mem::discriminant(&updated.status().to_query()),
-                std::mem::discriminant(self.handler.from()),
-                "Received status: {:?}, expected: {:?}",
-                updated.status().to_query(),
-                self.handler.from(),
-            );
-
-            let updated = self.handler.handle_update(updated).await;
-
-            assert_eq!(
-                std::mem::discriminant(&updated.status().to_query()),
-                std::mem::discriminant(self.handler.to()),
-                "Updated to status: {:?}, expected: {:?}",
-                updated.status().to_query(),
-                self.handler.to(),
-            );
-
-            let updated_document = bson::to_document(&updated).unwrap();
-            let query = doc! { "_id" : updated.oid() };
-            let updated_doc = doc! {
-                "$set": updated_document
-            };
-            log::debug!("Document updated: {:?}", updated_doc);
-            self.collection
-                .update_one(query, updated_doc, None)
-                .await
-                .unwrap();
+            self.handle_update(updated, false, &mut hash_set, &mut ord_time)
+                .await;
 
             i += 1;
             if i >= UPDATES_NUM {
