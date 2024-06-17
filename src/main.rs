@@ -103,8 +103,12 @@ impl From<String> for Desitnation {
     }
 }
 
-trait StatusT {
-    type Query;
+trait StatusQueryT: serde::Serialize + DeserializeOwned + Debug {}
+
+trait StatusT: serde::Serialize + DeserializeOwned + Debug {
+    type Query: StatusQueryT;
+
+    fn to_query(&self) -> Self::Query;
     // fn tag(&self) -> &str;
 }
 
@@ -118,8 +122,10 @@ enum Status {
     Finalized,
 }
 
-impl Status {
-    fn to_query(&self) -> StatusQuery {
+impl StatusT for Status {
+    type Query = StatusQuery;
+
+    fn to_query(&self) -> Self::Query {
         match self {
             Status::Pending(_) => StatusQuery::Pending,
             Status::Approved(_) => StatusQuery::Approved,
@@ -138,13 +144,16 @@ enum StatusQuery {
     Finalized,
 }
 
+impl StatusQueryT for StatusQuery {}
+
 trait RequestT: DeserializeOwned + Serialize + Unpin + Send + Sync + Debug {
+    type Status: StatusT;
     type Payload;
 
     fn oid(&self) -> &ObjectId;
     fn cid(&self) -> &Cid;
     fn accepted_at(&self) -> &chrono::DateTime<chrono::Utc>;
-    fn status(&self) -> &Status;
+    fn status(&self) -> &Self::Status;
     fn payload(&self) -> &Self::Payload;
 }
 
@@ -199,6 +208,7 @@ impl Request {
 }
 
 impl RequestT for Request {
+    type Status = Status;
     type Payload = String;
     fn oid(&self) -> &ObjectId {
         self.oid()
@@ -261,8 +271,11 @@ impl Producer {
 
 trait HandleUpdate {
     type R: RequestT;
-    fn from(&self) -> &StatusQuery;
-    fn to(&self) -> &StatusQuery;
+
+    // DD: Is it too overengineered?
+    fn from(&self) -> &<<Self::R as RequestT>::Status as StatusT>::Query;
+    fn to(&self) -> &<<Self::R as RequestT>::Status as StatusT>::Query;
+
     #[must_use]
     async fn handle_update(&self, updated: Self::R) -> Self::R;
 }
