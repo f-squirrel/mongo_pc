@@ -273,7 +273,7 @@ impl Consumer {
             }
             ord_time.insert(doc.accepted_at().to_owned());
             hash_set.insert(doc.cid().to_owned());
-            update_status(doc, self.update.clone(), self.collection.clone()).await;
+            self.update_status(doc).await;
             i += 1;
         }
 
@@ -292,7 +292,7 @@ impl Consumer {
             // DD: Place holder for the actual business logic - START
 
             let updated = event.full_document.unwrap();
-            update_status(updated, self.update.clone(), self.collection.clone()).await;
+            self.update_status(updated).await;
 
             i += 1;
             if i >= UPDATES_NUM {
@@ -302,142 +302,23 @@ impl Consumer {
         }
         log::info!("Consumed {i}, no more updates");
     }
-}
 
-async fn consume_created(
-    collection: Collection<Request>,
-    from: StatusQuery,
-    to: StatusQuery,
-    update: Status,
-) {
-    let pipeline = vec![doc! {
-          "$match" : doc! { "operationType" : "insert" },
-    }];
-    watch_and_update(collection, pipeline, from, to, update).await;
-}
+    async fn update_status(&self, mut to_update: Request) -> Request {
+        to_update.status = self.update.clone();
 
-async fn consume_updated(
-    collection: Collection<Request>,
-    from: StatusQuery,
-    to: StatusQuery,
-    update: Status,
-) {
-    let from_status = bson::ser::to_bson(&from).unwrap();
-    let name = from_status;
-    let pipeline = vec![doc! {
-      "$match": {
-                   "$and": [
-                   // DD: for simple cases, when status is a value
-                   { "updateDescription.updatedFields.status.tag": { "$eq":  name } },
-                   { "operationType": "update" },
-                   ]
-           },
-    }];
-    watch_and_update(collection, pipeline, from, to, update).await;
-}
+        let updated_document = bson::to_document(&to_update).unwrap();
+        let query = doc! { "_id" : to_update.oid() };
+        let updated = doc! {
+            "$set": updated_document
+        };
+        log::debug!("Document updated: {:?}", updated);
+        self.collection
+            .update_one(query, updated, None)
+            .await
+            .unwrap();
 
-async fn watch_and_update(
-    collection: Collection<Request>,
-    pipeline: Vec<Document>,
-    _from: StatusQuery,
-    _to: StatusQuery,
-    update: Status,
-) {
-    if let Some(delay) = CONSUME_DELAY {
-        log::info!("Delaying consumer for {:?}", delay);
-        time::sleep(delay).await;
+        to_update
     }
-
-    let full_doc = Some(FullDocumentType::UpdateLookup);
-    let opts = ChangeStreamOptions::builder()
-        .full_document(full_doc)
-        .build();
-
-    let mut hash_set = HashSet::new();
-
-    let mut update_change_stream = collection.watch(pipeline, opts).await.unwrap();
-    log::info!("Watching for updates");
-
-    let from_status = bson::ser::to_bson(&_from).unwrap();
-    let name = from_status;
-    let filter = doc! {"status.tag": name};
-    let mut pre_watched_data = collection.find(filter, None).await.unwrap();
-
-    let mut ord_time = std::collections::BTreeSet::new();
-    let mut i = 0;
-    while let Some(doc) = pre_watched_data.next().await.transpose().unwrap() {
-        if let Some(accepted_at) = ord_time.last() {
-            if doc.accepted_at() < accepted_at {
-                log::warn!("Out of order data: {:?}", doc)
-            }
-        }
-        ord_time.insert(doc.accepted_at().to_owned());
-        hash_set.insert(doc.cid().to_owned());
-        update_status(doc, update.clone(), collection.clone()).await;
-        i += 1;
-    }
-
-    log::info!("Pre-watched data updated: {:?}", i);
-
-    let mut i = 0;
-    while let Some(event) = update_change_stream.next().await.transpose().unwrap() {
-        log::debug!(
-            "Update performed: {:?}, full document: {:?}",
-            event.update_description,
-            event.full_document
-        );
-
-        // DD: Place holder for the actual business logic - START
-
-        let updated = event.full_document.unwrap();
-
-        if let Some(accepted_at) = ord_time.last() {
-            if updated.accepted_at() < accepted_at {
-                log::warn!("Out of order data: {:?}", updated);
-            }
-        }
-        ord_time.insert(updated.accepted_at().to_owned());
-
-        if !hash_set.is_empty() {
-            if let Some(id) = hash_set.get(updated.cid()) {
-                log::info!(
-                    "Already processed: {:?}, hash_set size: {}",
-                    id,
-                    hash_set.len()
-                );
-                continue;
-            } else {
-                log::info!("No hash_set entry for: {:?}, clear cache", updated.cid());
-                hash_set.clear();
-            }
-        }
-        update_status(updated, update.clone(), collection.clone()).await;
-
-        i += 1;
-        if i >= UPDATES_NUM {
-            log::info!("Processed all updates");
-            break;
-        }
-    }
-    log::info!("Consumed {i}, no more updates");
-}
-
-async fn update_status(
-    mut to_update: Request,
-    update: Status,
-    collection: Collection<Request>,
-) -> Request {
-    to_update.status = update;
-
-    let updated_document = bson::to_document(&to_update).unwrap();
-    let query = doc! { "_id" : to_update.oid() };
-    let updated = doc! {
-        "$set": updated_document
-    };
-    log::debug!("Document updated: {:?}", updated);
-    collection.update_one(query, updated, None).await.unwrap();
-
-    to_update
 }
 
 fn generate_string_of_byte_length(byte_length: usize) -> String {
