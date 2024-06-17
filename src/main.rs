@@ -88,8 +88,10 @@ struct Request {
     #[serde(with = "ts_milliseconds")]
     accepted_at: chrono::DateTime<chrono::Utc>,
 
+    // DD: received from client
     cid: Cid,
     payload: String,
+
     status: Status,
 }
 
