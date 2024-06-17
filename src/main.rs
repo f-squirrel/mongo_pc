@@ -16,7 +16,7 @@ use tokio::time;
 const UPDATES_NUM: usize = 1000;
 // const PRODUCE_DELAY: Option<Duration> = Some(time::Duration::from_secs(10));
 const PRODUCE_DELAY: Option<Duration> = None;
-const CONSUME_DELAY: Option<Duration> = Some(time::Duration::from_secs(10));
+// const CONSUME_DELAY: Option<Duration> = Some(time::Duration::from_secs(10));
 const PRODUCE_SLEEP: Option<Duration> = Some(Duration::from_millis(50));
 const PAYLOAD_SIZE_BYTES: usize = 1024;
 
@@ -107,6 +107,17 @@ enum Status {
     Finalized,
 }
 
+impl Status {
+    fn to_query(&self) -> StatusQuery {
+        match self {
+            Status::Pending(_) => StatusQuery::Pending,
+            Status::Approved(_) => StatusQuery::Approved,
+            Status::Processed => StatusQuery::Processed,
+            Status::Finalized => StatusQuery::Finalized,
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum StatusQuery {
@@ -114,6 +125,13 @@ enum StatusQuery {
     Approved,
     Processed,
     Finalized,
+}
+
+trait RequestT {
+    fn oid(&self) -> ObjectId;
+    fn cid(&self) -> Cid;
+    fn accepted_at(&self) -> chrono::DateTime<chrono::Utc>;
+    fn status(&self) -> &Status;
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Getters)]
@@ -159,28 +177,6 @@ impl Request {
     }
 }
 
-async fn produce(collection: Collection<Request>) {
-    if let Some(delay) = PRODUCE_DELAY {
-        log::info!("Delaying producer for {:?}", delay);
-        time::sleep(delay).await;
-    }
-    log::info!("Producing data");
-    let start = time::Instant::now();
-    for i in 0..UPDATES_NUM {
-        let payload = generate_string_of_byte_length(PAYLOAD_SIZE_BYTES);
-        let data = Request::new(payload);
-        let updated_document = bson::to_document(&data).unwrap();
-        log::info!("Producing data: {:?}", updated_document);
-        collection.insert_one(data, None).await.unwrap();
-        log::info!("Produced {i}");
-        if let Some(sleep) = PRODUCE_SLEEP {
-            time::sleep(sleep).await;
-        }
-    }
-    let elapsed = start.elapsed();
-    log::info!("Data produced, elapsed: {:?}", elapsed);
-}
-
 struct Producer {
     collection: Collection<Request>,
     payload_size: usize,
@@ -219,28 +215,55 @@ impl Producer {
     }
 }
 
-struct Consumer {
+struct Consumer<T: HandleUpdate> {
     collection: Collection<Request>,
     pipeline: Vec<Document>,
+    handler: T,
+}
+
+trait HandleUpdate {
+    fn from(&self) -> &StatusQuery;
+    fn to(&self) -> &StatusQuery;
+    async fn handle_update(&self, updated: Request) -> Request;
+}
+
+struct DemoHandler {
     from: StatusQuery,
     to: StatusQuery,
     update: Status,
 }
 
-impl Consumer {
-    fn new(
-        collection: Collection<Request>,
-        pipeline: Vec<Document>,
-        from: StatusQuery,
-        to: StatusQuery,
-        update: Status,
-    ) -> Self {
+impl HandleUpdate for DemoHandler {
+    fn from(&self) -> &StatusQuery {
+        &self.from
+    }
+
+    fn to(&self) -> &StatusQuery {
+        &self.to
+    }
+
+    async fn handle_update(&self, mut updated: Request) -> Request {
+        assert_eq!(
+            std::mem::discriminant(&updated.status.to_query()),
+            std::mem::discriminant(self.from()),
+            "Received status: {:?}, expected: {:?}",
+            updated.status.to_query(),
+            self.from(),
+        );
+        updated.status = self.update.clone();
+        updated
+    }
+}
+
+impl<T> Consumer<T>
+where
+    T: HandleUpdate,
+{
+    fn new(collection: Collection<Request>, pipeline: Vec<Document>, handler: T) -> Self {
         Self {
             collection,
             pipeline,
-            from,
-            to,
-            update,
+            handler,
         }
     }
 
@@ -256,7 +279,7 @@ impl Consumer {
             .await
             .unwrap();
 
-        let from_status = bson::ser::to_bson(&self.from).unwrap();
+        let from_status = bson::ser::to_bson(self.handler.from()).unwrap();
         let name = from_status;
         let filter = doc! {"status.tag": name};
         let mut pre_watched_data = self.collection.find(filter, None).await.unwrap();
@@ -273,7 +296,7 @@ impl Consumer {
             }
             ord_time.insert(doc.accepted_at().to_owned());
             hash_set.insert(doc.cid().to_owned());
-            self.handle_update(doc).await;
+            self.handler.handle_update(doc).await;
             i += 1;
         }
 
@@ -289,7 +312,7 @@ impl Consumer {
                 event.full_document
             );
             let updated = event.full_document.unwrap();
-            let updated = self.handle_update(updated).await;
+            let updated = self.handler.handle_update(updated).await;
 
             let updated_document = bson::to_document(&updated).unwrap();
             let query = doc! { "_id" : updated.oid() };
@@ -309,11 +332,6 @@ impl Consumer {
             }
         }
         log::info!("Consumed {i}, no more updates");
-    }
-
-    async fn handle_update(&self, mut updated: Request) -> Request {
-        updated.status = self.update.clone();
-        updated
     }
 }
 
@@ -355,19 +373,27 @@ async fn main() {
                 .await
         }
         "consumer1" => {
+            let handler = DemoHandler {
+                from: StatusQuery::Pending,
+                to: StatusQuery::Approved,
+                update: Status::Approved(Approver("approver".to_string())),
+            };
             Consumer::new(
                 collection,
                 vec![doc! {
                     "$match" : doc! { "operationType" : "insert" },
                 }],
-                StatusQuery::Pending,
-                StatusQuery::Approved,
-                Status::Approved(Approver("approver".to_string())),
+                handler,
             )
             .consume()
             .await
         }
         "consumer2" => {
+            let handler = DemoHandler {
+                from: StatusQuery::Approved,
+                to: StatusQuery::Processed,
+                update: Status::Processed,
+            };
             Consumer::new(
                 collection,
                 vec![doc! {
@@ -379,14 +405,17 @@ async fn main() {
                         ]
                 },
                 }],
-                StatusQuery::Approved,
-                StatusQuery::Processed,
-                Status::Processed,
+                handler,
             )
             .consume()
             .await
         }
         "consumer3" => {
+            let handler = DemoHandler {
+                from: StatusQuery::Processed,
+                to: StatusQuery::Finalized,
+                update: Status::Finalized,
+            };
             Consumer::new(
                 collection,
                 vec![doc! {
@@ -398,9 +427,7 @@ async fn main() {
                         ]
                 },
                 }],
-                StatusQuery::Processed,
-                StatusQuery::Finalized,
-                Status::Finalized,
+                handler,
             )
             .consume()
             .await
