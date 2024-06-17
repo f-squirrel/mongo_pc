@@ -128,10 +128,13 @@ enum StatusQuery {
 }
 
 trait RequestT {
-    fn oid(&self) -> ObjectId;
-    fn cid(&self) -> Cid;
-    fn accepted_at(&self) -> chrono::DateTime<chrono::Utc>;
+    type Payload;
+
+    fn oid(&self) -> &ObjectId;
+    fn cid(&self) -> &Cid;
+    fn accepted_at(&self) -> &chrono::DateTime<chrono::Utc>;
     fn status(&self) -> &Status;
+    fn payload(&self) -> &Self::Payload;
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Getters)]
@@ -150,7 +153,6 @@ struct Request {
     // DD: received from client
     cid: Cid,
     payload: String,
-
     status: Status,
 }
 
@@ -174,6 +176,29 @@ impl Request {
             payload: payload.into(),
             status: Status::Pending(Desitnation("sender".to_string())),
         }
+    }
+}
+
+impl RequestT for Request {
+    type Payload = String;
+    fn oid(&self) -> &ObjectId {
+        self.oid()
+    }
+
+    fn cid(&self) -> &Cid {
+        self.cid()
+    }
+
+    fn accepted_at(&self) -> &chrono::DateTime<chrono::Utc> {
+        self.accepted_at()
+    }
+
+    fn status(&self) -> &Status {
+        self.status()
+    }
+
+    fn payload(&self) -> &Self::Payload {
+        self.payload()
     }
 }
 
@@ -312,6 +337,22 @@ where
                 event.full_document
             );
             let updated = event.full_document.unwrap();
+
+            if let Some(accepted_at) = ord_time.last() {
+                if updated.accepted_at() < accepted_at {
+                    log::warn!("Out of order data: {:?}", updated)
+                }
+            }
+
+            ord_time.insert(updated.accepted_at().to_owned());
+
+            if hash_set.contains(updated.cid()) {
+                log::warn!("Duplicate data: {:?}", updated);
+                continue;
+            } else {
+                log::info!("Clear hash cache, no duplicates");
+                hash_set.clear();
+            }
             let updated = self.handler.handle_update(updated).await;
 
             let updated_document = bson::to_document(&updated).unwrap();
