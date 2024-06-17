@@ -1,7 +1,6 @@
 use std::{
     collections::HashSet,
     fmt::Debug,
-    hash,
     marker::{Send, Sync, Unpin},
     time::Duration,
 };
@@ -327,14 +326,12 @@ where
 
         if is_prewatched {
             hash_set.insert(updated.cid().to_owned());
+        } else if hash_set.contains(updated.cid()) {
+            log::warn!("Duplicate data: {:?}", updated);
+            return;
         } else {
-            if hash_set.contains(updated.cid()) {
-                log::warn!("Duplicate data: {:?}", updated);
-                return;
-            } else {
-                log::info!("Clear hash cache, no duplicates");
-                hash_set.clear();
-            }
+            log::info!("Clear hash cache, no duplicates");
+            hash_set.clear();
         }
 
         assert_eq!(
