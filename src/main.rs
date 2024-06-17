@@ -175,11 +175,11 @@ impl Request {
         let unique_req_data = format!("unique_req_data {cid:?}").to_owned();
         Request {
             oid: ObjectId::new(),
-            cid: cid,
+            cid,
             accepted_at: chrono::Utc::now(),
             payload: payload.into(),
             status: Status::Pending(Desitnation("sender".to_string())),
-            unique_req_data: unique_req_data,
+            unique_req_data,
         }
     }
 
@@ -189,11 +189,11 @@ impl Request {
         let unique_req_data = format!("unique_req_data {cid:?}").to_owned();
         Request {
             oid: ObjectId::new(),
-            cid: cid,
+            cid,
             accepted_at: chrono::Utc::now(),
             payload: payload.into(),
             status: Status::Pending(Desitnation("sender".to_string())),
-            unique_req_data: unique_req_data,
+            unique_req_data,
         }
     }
 }
