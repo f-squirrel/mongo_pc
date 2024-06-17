@@ -1,4 +1,9 @@
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::HashSet,
+    fmt::Debug,
+    marker::{Send, Sync, Unpin},
+    time::Duration,
+};
 
 use futures_util::stream::StreamExt;
 
@@ -10,6 +15,7 @@ use mongodb::{
     options::{ChangeStreamOptions, FullDocumentType},
     Collection,
 };
+use serde::{de::DeserializeOwned, Serialize};
 use structopt::StructOpt;
 use tokio::time;
 
@@ -97,6 +103,11 @@ impl From<String> for Desitnation {
     }
 }
 
+trait StatusT {
+    type Query;
+    // fn tag(&self) -> &str;
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "tag", content = "content")]
@@ -127,7 +138,7 @@ enum StatusQuery {
     Finalized,
 }
 
-trait RequestT {
+trait RequestT: DeserializeOwned + Serialize + Unpin + Send + Sync + Debug {
     type Payload;
 
     fn oid(&self) -> &ObjectId;
@@ -154,27 +165,35 @@ struct Request {
     cid: Cid,
     payload: String,
     status: Status,
+
+    unique_req_data: String,
 }
 
 impl Request {
     pub(crate) fn new(payload: impl Into<String>) -> Self {
+        let cid: Cid = uuid::Uuid::new_v4().into();
+        let unique_req_data = format!("unique_req_data {cid:?}").to_owned();
         Request {
             oid: ObjectId::new(),
-            cid: uuid::Uuid::new_v4().into(),
+            cid: cid,
             accepted_at: chrono::Utc::now(),
             payload: payload.into(),
             status: Status::Pending(Desitnation("sender".to_string())),
+            unique_req_data: unique_req_data,
         }
     }
 
     #[allow(dead_code)]
     pub(crate) fn with_cid(cid: impl Into<Cid>, payload: impl Into<String>) -> Self {
+        let cid = cid.into();
+        let unique_req_data = format!("unique_req_data {cid:?}").to_owned();
         Request {
             oid: ObjectId::new(),
-            cid: cid.into(),
+            cid: cid,
             accepted_at: chrono::Utc::now(),
             payload: payload.into(),
             status: Status::Pending(Desitnation("sender".to_string())),
+            unique_req_data: unique_req_data,
         }
     }
 }
@@ -240,16 +259,11 @@ impl Producer {
     }
 }
 
-struct Consumer<T: HandleUpdate> {
-    collection: Collection<Request>,
-    pipeline: Vec<Document>,
-    handler: T,
-}
-
 trait HandleUpdate {
+    type R: RequestT;
     fn from(&self) -> &StatusQuery;
     fn to(&self) -> &StatusQuery;
-    async fn handle_update(&self, updated: Request) -> Request;
+    async fn handle_update(&self, updated: Self::R) -> Self::R;
 }
 
 struct DemoHandler {
@@ -259,6 +273,7 @@ struct DemoHandler {
 }
 
 impl HandleUpdate for DemoHandler {
+    type R = Request;
     fn from(&self) -> &StatusQuery {
         &self.from
     }
@@ -268,23 +283,23 @@ impl HandleUpdate for DemoHandler {
     }
 
     async fn handle_update(&self, mut updated: Request) -> Request {
-        assert_eq!(
-            std::mem::discriminant(&updated.status.to_query()),
-            std::mem::discriminant(self.from()),
-            "Received status: {:?}, expected: {:?}",
-            updated.status.to_query(),
-            self.from(),
-        );
         updated.status = self.update.clone();
         updated
     }
 }
 
-impl<T> Consumer<T>
+struct Consumer<H: HandleUpdate, D: RequestT> {
+    collection: Collection<D>,
+    pipeline: Vec<Document>,
+    handler: H,
+}
+
+impl<H, R> Consumer<H, R>
 where
-    T: HandleUpdate,
+    H: HandleUpdate<R = R>,
+    R: RequestT,
 {
-    fn new(collection: Collection<Request>, pipeline: Vec<Document>, handler: T) -> Self {
+    fn new(collection: Collection<R>, pipeline: Vec<Document>, handler: H) -> Self {
         Self {
             collection,
             pipeline,
@@ -353,7 +368,24 @@ where
                 log::info!("Clear hash cache, no duplicates");
                 hash_set.clear();
             }
+
+            assert_eq!(
+                std::mem::discriminant(&updated.status().to_query()),
+                std::mem::discriminant(self.handler.from()),
+                "Received status: {:?}, expected: {:?}",
+                updated.status().to_query(),
+                self.handler.from(),
+            );
+
             let updated = self.handler.handle_update(updated).await;
+
+            assert_eq!(
+                std::mem::discriminant(&updated.status().to_query()),
+                std::mem::discriminant(self.handler.to()),
+                "Updated to status: {:?}, expected: {:?}",
+                updated.status().to_query(),
+                self.handler.to(),
+            );
 
             let updated_document = bson::to_document(&updated).unwrap();
             let query = doc! { "_id" : updated.oid() };
