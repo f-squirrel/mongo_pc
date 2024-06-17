@@ -181,6 +181,129 @@ async fn produce(collection: Collection<Request>) {
     log::info!("Data produced, elapsed: {:?}", elapsed);
 }
 
+struct Producer {
+    collection: Collection<Request>,
+    payload_size: usize,
+    sleep: Option<Duration>,
+}
+
+impl Producer {
+    fn new(collection: Collection<Request>, payload_size: usize, sleep: Option<Duration>) -> Self {
+        Self {
+            collection,
+            payload_size,
+            sleep,
+        }
+    }
+
+    async fn produce(&self) {
+        if let Some(delay) = PRODUCE_DELAY {
+            log::info!("Delaying producer for {:?}", delay);
+            time::sleep(delay).await;
+        }
+        log::info!("Producing data");
+        let start = time::Instant::now();
+        for i in 0..UPDATES_NUM {
+            let payload = generate_string_of_byte_length(self.payload_size);
+            let data = Request::new(payload);
+            let updated_document = bson::to_document(&data).unwrap();
+            log::info!("Producing data: {:?}", updated_document);
+            self.collection.insert_one(data, None).await.unwrap();
+            log::info!("Produced {i}");
+            if let Some(sleep) = self.sleep {
+                time::sleep(sleep).await;
+            }
+        }
+        let elapsed = start.elapsed();
+        log::info!("Data produced, elapsed: {:?}", elapsed);
+    }
+}
+
+struct Consumer {
+    collection: Collection<Request>,
+    pipeline: Vec<Document>,
+    from: StatusQuery,
+    to: StatusQuery,
+    update: Status,
+}
+
+impl Consumer {
+    fn new(
+        collection: Collection<Request>,
+        pipeline: Vec<Document>,
+        from: StatusQuery,
+        to: StatusQuery,
+        update: Status,
+    ) -> Self {
+        Self {
+            collection,
+            pipeline,
+            from,
+            to,
+            update,
+        }
+    }
+
+    async fn consume(&self) {
+        let full_doc = Some(FullDocumentType::UpdateLookup);
+        let opts = ChangeStreamOptions::builder()
+            .full_document(full_doc)
+            .build();
+
+        let mut update_change_stream = self
+            .collection
+            .watch(self.pipeline.clone(), opts)
+            .await
+            .unwrap();
+
+        let from_status = bson::ser::to_bson(&self.from).unwrap();
+        let name = from_status;
+        let filter = doc! {"status.tag": name};
+        let mut pre_watched_data = self.collection.find(filter, None).await.unwrap();
+
+        let mut ord_time = std::collections::BTreeSet::new();
+
+        let mut hash_set = HashSet::new();
+        let mut i = 0;
+        while let Some(doc) = pre_watched_data.next().await.transpose().unwrap() {
+            if let Some(accepted_at) = ord_time.last() {
+                if doc.accepted_at() < accepted_at {
+                    log::warn!("Out of order data: {:?}", doc)
+                }
+            }
+            ord_time.insert(doc.accepted_at().to_owned());
+            hash_set.insert(doc.cid().to_owned());
+            update_status(doc, self.update.clone(), self.collection.clone()).await;
+            i += 1;
+        }
+
+        log::info!("Pre-watched data updated: {:?}", i);
+
+        log::info!("Watching for updates");
+
+        let mut i = 0;
+        while let Some(event) = update_change_stream.next().await.transpose().unwrap() {
+            log::debug!(
+                "Update performed: {:?}, full document: {:?}",
+                event.update_description,
+                event.full_document
+            );
+
+            // DD: Place holder for the actual business logic - START
+
+            let updated = event.full_document.unwrap();
+            update_status(updated, self.update.clone(), self.collection.clone()).await;
+
+            i += 1;
+            if i >= UPDATES_NUM {
+                log::info!("Processed all updates");
+                break;
+            }
+        }
+        log::info!("Consumed {i}, no more updates");
+    }
+}
+
 async fn consume_created(
     collection: Collection<Request>,
     from: StatusQuery,
@@ -349,34 +472,60 @@ async fn main() {
     log::info!("Connected to MongoDB");
 
     match opt.type_.as_str() {
-        "producer" => produce(collection).await,
+        "producer" => {
+            Producer::new(collection, PAYLOAD_SIZE_BYTES, PRODUCE_SLEEP)
+                .produce()
+                .await
+        }
         "consumer1" => {
-            consume_created(
+            Consumer::new(
                 collection,
+                vec![doc! {
+                    "$match" : doc! { "operationType" : "insert" },
+                }],
                 StatusQuery::Pending,
                 StatusQuery::Approved,
-                // Status::Pending(Desitnation("".to_string())),
                 Status::Approved(Approver("approver".to_string())),
             )
+            .consume()
             .await
         }
         "consumer2" => {
-            consume_updated(
+            Consumer::new(
                 collection,
+                vec![doc! {
+                    "$match": {
+                        "$and": [
+                        // DD: for simple cases, when status is a value
+                        { "updateDescription.updatedFields.status.tag": { "$eq": "approved" } },
+                        { "operationType": "update" },
+                        ]
+                },
+                }],
                 StatusQuery::Approved,
                 StatusQuery::Processed,
-                // Status::Approved(Approver("approver".to_string())),
                 Status::Processed,
             )
+            .consume()
             .await
         }
         "consumer3" => {
-            consume_updated(
+            Consumer::new(
                 collection,
+                vec![doc! {
+                    "$match": {
+                        "$and": [
+                        // DD: for simple cases, when status is a value
+                        { "updateDescription.updatedFields.status.tag": { "$eq": "processed" } },
+                        { "operationType": "update" },
+                        ]
+                },
+                }],
                 StatusQuery::Processed,
                 StatusQuery::Finalized,
                 Status::Finalized,
             )
+            .consume()
             .await
         }
         _ => panic!("Invalid type provided."),
