@@ -273,7 +273,7 @@ impl Consumer {
             }
             ord_time.insert(doc.accepted_at().to_owned());
             hash_set.insert(doc.cid().to_owned());
-            self.update_status(doc).await;
+            self.handle_update(doc).await;
             i += 1;
         }
 
@@ -288,11 +288,19 @@ impl Consumer {
                 event.update_description,
                 event.full_document
             );
-
-            // DD: Place holder for the actual business logic - START
-
             let updated = event.full_document.unwrap();
-            self.update_status(updated).await;
+            let updated = self.handle_update(updated).await;
+
+            let updated_document = bson::to_document(&updated).unwrap();
+            let query = doc! { "_id" : updated.oid() };
+            let updated_doc = doc! {
+                "$set": updated_document
+            };
+            log::debug!("Document updated: {:?}", updated_doc);
+            self.collection
+                .update_one(query, updated_doc, None)
+                .await
+                .unwrap();
 
             i += 1;
             if i >= UPDATES_NUM {
@@ -303,21 +311,9 @@ impl Consumer {
         log::info!("Consumed {i}, no more updates");
     }
 
-    async fn update_status(&self, mut to_update: Request) -> Request {
-        to_update.status = self.update.clone();
-
-        let updated_document = bson::to_document(&to_update).unwrap();
-        let query = doc! { "_id" : to_update.oid() };
-        let updated = doc! {
-            "$set": updated_document
-        };
-        log::debug!("Document updated: {:?}", updated);
-        self.collection
-            .update_one(query, updated, None)
-            .await
-            .unwrap();
-
-        to_update
+    async fn handle_update(&self, mut updated: Request) -> Request {
+        updated.status = self.update.clone();
+        updated
     }
 }
 
