@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     fmt::Debug,
     marker::{Send, Sync, Unpin},
     time::Duration,
@@ -7,7 +7,7 @@ use std::{
 
 use futures_util::stream::StreamExt;
 
-use chrono::serde::ts_milliseconds;
+use chrono::{serde::ts_milliseconds, DateTime, Utc};
 use derive_getters::Getters;
 
 use mongodb::{
@@ -15,7 +15,7 @@ use mongodb::{
     options::{ChangeStreamOptions, FullDocumentType},
     Collection,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use structopt::StructOpt;
 use tokio::time;
 
@@ -53,7 +53,7 @@ impl std::fmt::Display for Cid {
     }
 }
 
-impl serde::Serialize for Cid {
+impl Serialize for Cid {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -94,7 +94,7 @@ impl From<uuid::Uuid> for Cid {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Approver(String);
 
 impl From<String> for Approver {
@@ -103,7 +103,7 @@ impl From<String> for Approver {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Desitnation(String);
 
 impl From<String> for Desitnation {
@@ -112,9 +112,9 @@ impl From<String> for Desitnation {
     }
 }
 
-trait StatusQueryT: serde::Serialize + DeserializeOwned + Debug {}
+trait StatusQueryT: Serialize + DeserializeOwned + Debug {}
 
-trait StatusT: serde::Serialize + DeserializeOwned + Debug {
+trait StatusT: Serialize + DeserializeOwned + Debug {
     type Query: StatusQueryT;
 
     fn to_query(&self) -> Self::Query;
@@ -195,7 +195,7 @@ trait RequestT: DeserializeOwned + Serialize + Unpin + Send + Sync + Debug {
 
     fn oid(&self) -> &ObjectId;
     fn cid(&self) -> &Cid;
-    fn accepted_at(&self) -> &chrono::DateTime<chrono::Utc>;
+    fn accepted_at(&self) -> &DateTime<Utc>;
     fn status(&self) -> &Self::Status;
     fn payload(&self) -> &Self::Payload;
 }
@@ -206,12 +206,11 @@ trait RequestT: DeserializeOwned + Serialize + Unpin + Send + Sync + Debug {
 struct Request {
     // Internal data, not exposed to the outside users.
     // It shall be used only for internal purposes.
-    // #[getter(skip)]
     #[serde(rename = "_id")]
     oid: ObjectId,
 
     #[serde(with = "ts_milliseconds")]
-    accepted_at: chrono::DateTime<chrono::Utc>,
+    accepted_at: DateTime<Utc>,
 
     // DD: received from client
     cid: Cid,
@@ -228,7 +227,7 @@ impl Request {
         Request {
             oid: ObjectId::new(),
             cid,
-            accepted_at: chrono::Utc::now(),
+            accepted_at: Utc::now(),
             payload: payload.into(),
             status: Status::Pending(Desitnation("sender".to_string())),
             unique_req_data,
@@ -242,7 +241,7 @@ impl Request {
         Request {
             oid: ObjectId::new(),
             cid,
-            accepted_at: chrono::Utc::now(),
+            accepted_at: Utc::now(),
             payload: payload.into(),
             status: Status::Pending(Desitnation("sender".to_string())),
             unique_req_data,
@@ -261,7 +260,7 @@ impl RequestT for Request {
         self.cid()
     }
 
-    fn accepted_at(&self) -> &chrono::DateTime<chrono::Utc> {
+    fn accepted_at(&self) -> &DateTime<Utc> {
         self.accepted_at()
     }
 
@@ -271,6 +270,38 @@ impl RequestT for Request {
 
     fn payload(&self) -> &Self::Payload {
         self.payload()
+    }
+}
+
+impl From<ApiRequest> for Request {
+    fn from(api_request: ApiRequest) -> Self {
+        Self::with_cid(api_request.cid, api_request.payload)
+    }
+}
+
+struct ApiRequest {
+    cid: Cid,
+    payload: String,
+    _unique_req_data: String,
+}
+
+trait Produce<ApiRequestT, ProducedRequestT>
+where
+    ApiRequestT: Into<ProducedRequestT>,
+    ProducedRequestT: RequestT,
+{
+    async fn produce(&self, data: ApiRequestT);
+}
+
+struct ProducerQ<ApiRequestT: Into<ProducedRequestT>, ProducedRequestT: RequestT> {
+    collection: Collection<ProducedRequestT>,
+    _phantom: std::marker::PhantomData<ApiRequestT>,
+}
+
+// DD: make it templated
+impl Produce<Request, Request> for ProducerQ<Request, Request> {
+    async fn produce(&self, data: Request) {
+        self.collection.insert_one(data, None).await.unwrap();
     }
 }
 
@@ -299,9 +330,13 @@ impl Producer {
         for i in 0..UPDATES_NUM {
             let payload = generate_string_of_byte_length(self.payload_size);
             let data = Request::new(payload);
-            tracing::info!("Producing data: {:?}", data);
+            tracing::trace!("Producing data: {:?}", data);
             self.collection.insert_one(data, None).await.unwrap();
-            tracing::info!("Produced {i}");
+            if i % 100 == 0 {
+                tracing::debug!("Produced {i}");
+            } else {
+                tracing::trace!("Produced {i}");
+            }
             if let Some(sleep) = self.sleep {
                 time::sleep(sleep).await;
             }
@@ -388,7 +423,7 @@ where
         updated: R,
         is_prewatched: bool,
         hash_set: &mut HashSet<Cid>,
-        ord_time: &mut std::collections::BTreeSet<chrono::DateTime<chrono::Utc>>,
+        ord_time: &mut BTreeSet<DateTime<Utc>>,
     ) {
         if let Some(accepted_at) = ord_time.last() {
             if updated.accepted_at() < accepted_at {
@@ -455,7 +490,7 @@ where
         let filter = doc! {"status.tag": name};
         let mut pre_watched_data = self.collection.find(filter, None).await.unwrap();
 
-        let mut ord_time = std::collections::BTreeSet::new();
+        let mut ord_time = BTreeSet::new();
 
         let mut hash_set = HashSet::new();
         let mut i = 0;
