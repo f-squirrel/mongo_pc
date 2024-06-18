@@ -49,7 +49,7 @@ struct Cid(
 
 impl std::fmt::Display for Cid {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0.to_string())
+        write!(f, "{}", self.0)
     }
 }
 
@@ -348,16 +348,12 @@ where
 
         if is_prewatched {
             hash_set.insert(updated.cid().to_owned());
-        } else {
-            if hash_set.contains(updated.cid()) {
-                tracing::info!("Ignored duplicate data, cid: {:?}", updated.cid());
-                return;
-            } else {
-                if !hash_set.is_empty() {
-                    tracing::info!("Clear hash cache, no duplicates");
-                    hash_set.clear();
-                }
-            }
+        } else if hash_set.contains(updated.cid()) {
+            tracing::info!("Ignored duplicate data, cid: {:?}", updated.cid());
+            return;
+        } else if !hash_set.is_empty() {
+            tracing::info!("Clear hash cache, no duplicates");
+            hash_set.clear();
         }
 
         assert_eq!(
