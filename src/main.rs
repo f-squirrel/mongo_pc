@@ -299,8 +299,7 @@ impl Producer {
         for i in 0..UPDATES_NUM {
             let payload = generate_string_of_byte_length(self.payload_size);
             let data = Request::new(payload);
-            let updated_document = bson::to_document(&data).unwrap();
-            tracing::info!("Producing data: {:?}", updated_document);
+            tracing::info!("Producing data: {:?}", data);
             self.collection.insert_one(data, None).await.unwrap();
             tracing::info!("Produced {i}");
             if let Some(sleep) = self.sleep {
@@ -340,7 +339,8 @@ impl HandleUpdate for DemoHandler {
     }
 
     #[must_use]
-    async fn handle_update(&self, mut updated: Request) -> Request {
+    async fn handle_update(&self, updated: Request) -> Request {
+        let mut updated = updated;
         updated.status = self.update.clone();
         updated
     }
