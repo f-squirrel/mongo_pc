@@ -279,36 +279,40 @@ impl From<ApiRequest> for Request {
     }
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize, Getters)]
 struct ApiRequest {
     cid: Cid,
     payload: String,
     _unique_req_data: String,
 }
 
-trait Produce<ApiRequestT, ProducedRequestT>
-where
-    ApiRequestT: Into<ProducedRequestT>,
-    ProducedRequestT: RequestT,
-{
-    async fn produce(&self, data: ApiRequestT);
-}
+impl ApiRequestT for ApiRequest {}
 
-struct ProducerQ<ApiRequestT: Into<ProducedRequestT>, ProducedRequestT: RequestT> {
-    collection: Collection<ProducedRequestT>,
-    _phantom: std::marker::PhantomData<ApiRequestT>,
-}
-
-// DD: make it templated
-impl Produce<Request, Request> for ProducerQ<Request, Request> {
-    async fn produce(&self, data: Request) {
-        self.collection.insert_one(data, None).await.unwrap();
-    }
+trait Produce {
+    type ApiRequest: ApiRequestT;
+    async fn produce(&self, data: Self::ApiRequest);
 }
 
 struct Producer {
     collection: Collection<Request>,
     payload_size: usize,
     sleep: Option<Duration>,
+}
+
+trait ApiRequestT: DeserializeOwned + Debug {}
+
+impl Produce for Producer {
+    type ApiRequest = ApiRequest;
+
+    async fn produce(&self, data: Self::ApiRequest) {
+        let span = span!(Level::INFO, "request", cid = data.cid().to_string());
+        let _enter = span.enter();
+
+        tracing::trace!("Received  request: {:?}", data);
+        let data: Request = data.into();
+        self.collection.insert_one(&data, None).await.unwrap();
+        tracing::trace!("Produced request: {:?}", data);
+    }
 }
 
 impl Producer {
@@ -377,6 +381,7 @@ impl HandleUpdate for DemoHandler {
     async fn handle_update(&self, updated: Request) -> Request {
         let mut updated = updated;
         updated.status = self.update.clone();
+        tracing::trace!("Req unique data: {}", updated.unique_req_data());
         updated
     }
 }
@@ -474,6 +479,7 @@ where
     }
 
     async fn consume(&self) {
+        tracing::debug!("Initiating change stream");
         let full_doc = Some(FullDocumentType::UpdateLookup);
         let opts = ChangeStreamOptions::builder()
             .full_document(full_doc)
@@ -488,6 +494,8 @@ where
         let from_status = bson::ser::to_bson(self.handler.from()).unwrap();
         let name = from_status;
         let filter = doc! {"status.tag": name};
+
+        tracing::debug!("Initiating pre-watched data, filter: {filter:?}");
         let mut pre_watched_data = self.collection.find(filter, None).await.unwrap();
 
         let mut ord_time = BTreeSet::new();
@@ -498,7 +506,7 @@ where
             let span = span!(Level::INFO, "request", cid = doc.cid().to_string());
             let _enter = span.enter();
 
-            tracing::debug!("Pre-watched data: {:?}", doc);
+            tracing::trace!("Pre-watched data: {:?}", doc);
             self.handle_update(doc, true, &mut hash_set, &mut ord_time)
                 .await;
             i += 1;
