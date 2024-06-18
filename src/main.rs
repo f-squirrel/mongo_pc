@@ -279,6 +279,8 @@ impl From<ApiRequest> for Request {
     }
 }
 
+trait ApiRequestT: DeserializeOwned + Debug {}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize, Getters)]
 struct ApiRequest {
     cid: Cid,
@@ -298,8 +300,6 @@ struct Producer {
     payload_size: usize,
     sleep: Option<Duration>,
 }
-
-trait ApiRequestT: DeserializeOwned + Debug {}
 
 impl Produce for Producer {
     type ApiRequest = ApiRequest;
