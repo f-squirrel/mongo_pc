@@ -19,6 +19,9 @@ use serde::{de::DeserializeOwned, Serialize};
 use structopt::StructOpt;
 use tokio::time;
 
+use tracing::{self, span, Level};
+use tracing_subscriber::EnvFilter;
+
 const UPDATES_NUM: usize = 1000;
 // const PRODUCE_DELAY: Option<Duration> = Some(time::Duration::from_secs(10));
 const PRODUCE_DELAY: Option<Duration> = None;
@@ -43,6 +46,12 @@ struct Cid(
     // compact: bytes
     uuid::Uuid,
 );
+
+impl std::fmt::Display for Cid {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0.to_string())
+    }
+}
 
 impl serde::Serialize for Cid {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -248,24 +257,24 @@ impl Producer {
 
     async fn produce(&self) {
         if let Some(delay) = PRODUCE_DELAY {
-            log::info!("Delaying producer for {:?}", delay);
+            tracing::info!("Delaying producer for {:?}", delay);
             time::sleep(delay).await;
         }
-        log::info!("Producing data");
+        tracing::info!("Producing data");
         let start = time::Instant::now();
         for i in 0..UPDATES_NUM {
             let payload = generate_string_of_byte_length(self.payload_size);
             let data = Request::new(payload);
             let updated_document = bson::to_document(&data).unwrap();
-            log::info!("Producing data: {:?}", updated_document);
+            tracing::info!("Producing data: {:?}", updated_document);
             self.collection.insert_one(data, None).await.unwrap();
-            log::info!("Produced {i}");
+            tracing::info!("Produced {i}");
             if let Some(sleep) = self.sleep {
                 time::sleep(sleep).await;
             }
         }
         let elapsed = start.elapsed();
-        log::info!("Data produced, elapsed: {:?}", elapsed);
+        tracing::info!("Data produced, elapsed: {:?}", elapsed);
     }
 }
 
@@ -305,7 +314,7 @@ impl HandleUpdate for DemoHandler {
 
 struct Consumer<H: HandleUpdate, D: RequestT> {
     collection: Collection<D>,
-    pipeline: Vec<Document>,
+    watch_pipeline: Vec<Document>,
     handler: H,
 }
 
@@ -314,10 +323,10 @@ where
     H: HandleUpdate<R = R>,
     R: RequestT,
 {
-    fn new(collection: Collection<R>, pipeline: Vec<Document>, handler: H) -> Self {
+    fn new(collection: Collection<R>, watch_pipeline: Vec<Document>, handler: H) -> Self {
         Self {
             collection,
-            pipeline,
+            watch_pipeline,
             handler,
         }
     }
@@ -331,7 +340,7 @@ where
     ) {
         if let Some(accepted_at) = ord_time.last() {
             if updated.accepted_at() < accepted_at {
-                log::warn!("Out of order data: {:?}", updated)
+                tracing::warn!("Out of order data: {:?}", updated)
             }
         }
 
@@ -339,12 +348,16 @@ where
 
         if is_prewatched {
             hash_set.insert(updated.cid().to_owned());
-        } else if hash_set.contains(updated.cid()) {
-            log::warn!("Duplicate data: {:?}", updated);
-            return;
         } else {
-            log::info!("Clear hash cache, no duplicates");
-            hash_set.clear();
+            if hash_set.contains(updated.cid()) {
+                tracing::info!("Ignored duplicate data, cid: {:?}", updated.cid());
+                return;
+            } else {
+                if !hash_set.is_empty() {
+                    tracing::info!("Clear hash cache, no duplicates");
+                    hash_set.clear();
+                }
+            }
         }
 
         assert_eq!(
@@ -370,7 +383,7 @@ where
         let updated_doc = doc! {
             "$set": updated_document
         };
-        log::debug!("Document updated: {:?}", updated_doc);
+        tracing::debug!("Document updated: {:?}", updated_doc);
         self.collection
             .update_one(query, updated_doc, None)
             .await
@@ -385,7 +398,7 @@ where
 
         let mut update_change_stream = self
             .collection
-            .watch(self.pipeline.clone(), opts)
+            .watch(self.watch_pipeline.clone(), opts)
             .await
             .unwrap();
 
@@ -399,33 +412,43 @@ where
         let mut hash_set = HashSet::new();
         let mut i = 0;
         while let Some(doc) = pre_watched_data.next().await.transpose().unwrap() {
+            let span = span!(Level::INFO, "request", cid = doc.cid().to_string());
+            let _enter = span.enter();
+
+            tracing::debug!("Pre-watched data: {:?}", doc);
             self.handle_update(doc, true, &mut hash_set, &mut ord_time)
                 .await;
             i += 1;
         }
 
-        log::info!("Pre-watched data updated: {:?}", i);
+        tracing::info!("Pre-watched data updated: {:?}", i);
 
-        log::info!("Watching for updates");
+        tracing::info!("Watching for updates");
 
         let mut i = 0;
         while let Some(event) = update_change_stream.next().await.transpose().unwrap() {
-            log::debug!(
+            tracing::debug!(
                 "Update performed: {:?}, full document: {:?}",
                 event.update_description,
                 event.full_document
             );
+
             let updated = event.full_document.unwrap();
+
+            let span = span!(Level::INFO, "request", cid = updated.cid().to_string());
+            let _enter = span.enter();
+
+            tracing::trace!("Update performed: {:?}", event.update_description);
             self.handle_update(updated, false, &mut hash_set, &mut ord_time)
                 .await;
 
             i += 1;
             if i >= UPDATES_NUM {
-                log::info!("Processed all updates");
+                tracing::info!("Processed all updates");
                 break;
             }
         }
-        log::info!("Consumed {i}, no more updates");
+        tracing::info!("Consumed {i}, no more updates");
     }
 }
 
@@ -442,7 +465,9 @@ fn generate_string_of_byte_length(byte_length: usize) -> String {
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
     let opt = Opt::from_args();
     let client = mongodb::Client::with_uri_str(opt.mongo_uri.as_str())
@@ -451,14 +476,14 @@ async fn main() {
 
     let db = client.database("admin");
     while let Err(error) = db.run_command(doc! {"replSetGetStatus": 1}, None).await {
-        log::info!("Waiting for MongoDB to be ready, error: {error:?}");
+        tracing::info!("Waiting for MongoDB to be ready, error: {error:?}");
         time::sleep(time::Duration::from_secs(1)).await;
     }
 
     let db = client.database("db_data");
     let collection = db.collection::<Request>("data");
 
-    log::info!("Connected to MongoDB");
+    tracing::info!("Connected to MongoDB");
 
     match opt.type_.as_str() {
         "producer" => {
