@@ -118,7 +118,41 @@ trait StatusT: serde::Serialize + DeserializeOwned + Debug {
     type Query: StatusQueryT;
 
     fn to_query(&self) -> Self::Query;
-    // fn tag(&self) -> &str;
+}
+
+pub(crate) struct WatchPipeline {
+    pipeline: Vec<Document>,
+}
+
+impl WatchPipeline {
+    pub(crate) fn with_raw_pipeline(pipeline: Vec<Document>) -> Self {
+        Self { pipeline }
+    }
+
+    pub(crate) fn with_insert() -> Self {
+        let pipeline = vec![doc! {
+            "$match" : doc! { "operationType" : "insert" },
+        }];
+        Self { pipeline }
+    }
+
+    pub(crate) fn with_update(expected_status: StatusQuery) -> Self {
+        let from_status = bson::ser::to_bson(&expected_status).unwrap();
+        let name = from_status;
+        let pipeline = vec![doc! {
+            "$match": {
+                "$and": [
+                { "updateDescription.updatedFields.status.tag": { "$eq": name} },
+                { "operationType": "update" },
+                ]
+        },
+        }];
+        Self { pipeline }
+    }
+
+    pub(crate) fn build(self) -> Vec<Document> {
+        self.pipeline
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -318,12 +352,30 @@ struct Consumer<H: HandleUpdate, D: RequestT> {
     handler: H,
 }
 
+pub(crate) trait Consume {
+    async fn consume(&self);
+}
+
+impl<H, R> Consume for Consumer<H, R>
+where
+    H: HandleUpdate<R = R>,
+    R: RequestT,
+{
+    async fn consume(&self) {
+        self.consume().await;
+    }
+}
+
 impl<H, R> Consumer<H, R>
 where
     H: HandleUpdate<R = R>,
     R: RequestT,
 {
-    fn new(collection: Collection<R>, watch_pipeline: Vec<Document>, handler: H) -> Self {
+    pub(crate) fn new(
+        collection: Collection<R>,
+        watch_pipeline: Vec<Document>,
+        handler: H,
+    ) -> Self {
         Self {
             collection,
             watch_pipeline,
@@ -493,15 +545,9 @@ async fn main() {
                 to: StatusQuery::Approved,
                 update: Status::Approved(Approver("approver".to_string())),
             };
-            Consumer::new(
-                collection,
-                vec![doc! {
-                    "$match" : doc! { "operationType" : "insert" },
-                }],
-                handler,
-            )
-            .consume()
-            .await
+            Consumer::new(collection, WatchPipeline::with_insert().build(), handler)
+                .consume()
+                .await
         }
         "consumer2" => {
             let handler = DemoHandler {
@@ -509,21 +555,11 @@ async fn main() {
                 to: StatusQuery::Processed,
                 update: Status::Processed,
             };
-            Consumer::new(
-                collection,
-                vec![doc! {
-                    "$match": {
-                        "$and": [
-                        // DD: for simple cases, when status is a value
-                        { "updateDescription.updatedFields.status.tag": { "$eq": "approved" } },
-                        { "operationType": "update" },
-                        ]
-                },
-                }],
-                handler,
-            )
-            .consume()
-            .await
+            let from = handler.from();
+            let watch_pipeline = WatchPipeline::with_update(from.clone());
+            Consumer::new(collection, watch_pipeline.build(), handler)
+                .consume()
+                .await
         }
         "consumer3" => {
             let handler = DemoHandler {
@@ -531,21 +567,19 @@ async fn main() {
                 to: StatusQuery::Finalized,
                 update: Status::Finalized,
             };
-            Consumer::new(
-                collection,
-                vec![doc! {
-                    "$match": {
-                        "$and": [
-                        // DD: for simple cases, when status is a value
-                        { "updateDescription.updatedFields.status.tag": { "$eq": "processed" } },
-                        { "operationType": "update" },
-                        ]
-                },
-                }],
-                handler,
-            )
-            .consume()
-            .await
+            // DD: Example of creating a raw pipeline
+            let raw_pipeline = vec![doc! {
+                "$match": {
+                    "$and": [
+                    { "updateDescription.updatedFields.status.tag": { "$eq": "processed" } },
+                    { "operationType": "update" },
+                    ]
+            },
+            }];
+            let watch_pipeline = WatchPipeline::with_raw_pipeline(raw_pipeline);
+            Consumer::new(collection, watch_pipeline.build(), handler)
+                .consume()
+                .await
         }
         _ => panic!("Invalid type provided."),
     }
