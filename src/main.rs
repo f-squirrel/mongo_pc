@@ -279,7 +279,9 @@ impl From<ApiRequest> for Request {
     }
 }
 
-trait ApiRequestT: DeserializeOwned + Debug {}
+trait ApiRequestT: Into<Self::Request> + DeserializeOwned + Debug {
+    type Request: RequestT;
+}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Getters)]
 struct ApiRequest {
@@ -288,7 +290,9 @@ struct ApiRequest {
     _unique_req_data: String,
 }
 
-impl ApiRequestT for ApiRequest {}
+impl ApiRequestT for ApiRequest {
+    type Request = Request;
+}
 
 trait Produce {
     type ApiRequest: ApiRequestT;
