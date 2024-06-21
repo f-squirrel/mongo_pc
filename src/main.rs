@@ -1,3 +1,9 @@
+pub(crate) mod api;
+pub(crate) mod consume;
+pub(crate) mod process;
+pub(crate) mod produce;
+pub(crate) mod request;
+
 use std::{
     collections::{BTreeSet, HashSet},
     fmt::Debug,
@@ -279,8 +285,10 @@ impl From<ApiRequest> for Request {
     }
 }
 
-trait ApiRequestT: Into<Self::Request> + DeserializeOwned + Debug {
+trait ApiRequestT: /* Into<Self::Request> + */ DeserializeOwned + Debug {
     type Request: RequestT;
+
+    fn cid(&self) -> &Cid;
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Getters)]
@@ -292,10 +300,13 @@ struct ApiRequest {
 
 impl ApiRequestT for ApiRequest {
     type Request = Request;
+    fn cid(&self) -> &Cid {
+        self.cid()
+    }
 }
 
 trait Produce {
-    type ApiRequest: ApiRequestT;
+    type ApiRequest: ApiRequestT + Into<Request>;
     async fn produce(&self, data: Self::ApiRequest);
 }
 
