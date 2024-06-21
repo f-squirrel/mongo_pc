@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use crate::request::{RequestT, StatusT};
 
 pub(crate) trait Process {

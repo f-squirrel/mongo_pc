@@ -1,4 +1,4 @@
-mod consumer;
+pub(crate) mod consumer;
 
 // use mod crate::api::cid::Cid;
 
@@ -24,3 +24,5 @@ mod consumer;
 pub(crate) trait Consume {
     async fn consume(&self);
 }
+
+pub(crate) use consumer::Consumer;

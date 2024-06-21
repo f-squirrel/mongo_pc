@@ -27,7 +27,7 @@ where
     R: RequestT,
 {
     async fn consume(&self) {
-        self.consume().await;
+        self.impl_consume().await;
     }
 }
 
@@ -103,7 +103,7 @@ where
             .unwrap();
     }
 
-    async fn consume(&self) {
+    async fn impl_consume(&self) {
         tracing::debug!("Initiating change stream");
         let full_doc = Some(FullDocumentType::UpdateLookup);
         let opts = ChangeStreamOptions::builder()
