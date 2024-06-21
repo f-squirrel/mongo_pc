@@ -218,14 +218,6 @@ impl Process for DemoHandler {
         &self.to
     }
 
-    // #[must_use]
-    // async fn handle_update(&self, updated: Request) -> Request {
-    //     let mut updated = updated;
-    //     updated.status = self.update.clone();
-    //     tracing::trace!("Req unique data: {}", updated.unique_req_data());
-    //     updated
-    // }
-
     async fn process(&self, updated: Self::R) -> Self::R {
         let mut updated = updated;
         updated.status = self.update.clone();
