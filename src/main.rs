@@ -4,18 +4,17 @@ pub(crate) mod process;
 pub(crate) mod produce;
 pub(crate) mod request;
 
-use crate::consume::consumer::Consume;
-
-use crate::consume::Consumer;
+use crate::consume::{Consume, Consumer};
 
 use std::{fmt::Debug, time::Duration};
 
 use api::cid::Cid;
 
 use chrono::{serde::ts_milliseconds, DateTime, Utc};
+use consume::FilterBuilder;
 use derive_getters::Getters;
 
-use mongodb::bson::{self, doc, oid::ObjectId, Document};
+use mongodb::bson::{self, doc, oid::ObjectId};
 use process::Process;
 use produce::{Produce, RequestT};
 use request::{StatusQueryT, StatusT};
@@ -57,41 +56,6 @@ struct Desitnation(String);
 impl From<String> for Desitnation {
     fn from(s: String) -> Self {
         Self(s)
-    }
-}
-
-pub(crate) struct WatchPipeline {
-    pipeline: Vec<Document>,
-}
-
-impl WatchPipeline {
-    pub(crate) fn with_raw_pipeline(pipeline: Vec<Document>) -> Self {
-        Self { pipeline }
-    }
-
-    pub(crate) fn with_insert() -> Self {
-        let pipeline = vec![doc! {
-            "$match" : doc! { "operationType" : "insert" },
-        }];
-        Self { pipeline }
-    }
-
-    pub(crate) fn with_update(expected_status: StatusQuery) -> Self {
-        let from_status = bson::ser::to_bson(&expected_status).unwrap();
-        let name = from_status;
-        let pipeline = vec![doc! {
-            "$match": {
-                "$and": [
-                { "updateDescription.updatedFields.status.tag": { "$eq": name} },
-                { "operationType": "update" },
-                ]
-        },
-        }];
-        Self { pipeline }
-    }
-
-    pub(crate) fn build(self) -> Vec<Document> {
-        self.pipeline
     }
 }
 
@@ -287,7 +251,11 @@ async fn main() {
                 update: Status::Approved(Approver("approver".to_string())),
             };
 
-            let x = Consumer::new(collection, WatchPipeline::with_insert().build(), handler);
+            let x = Consumer::new(
+                collection,
+                FilterBuilder::new().with_insert().build(),
+                handler,
+            );
             x.consume().await;
         }
         "consumer2" => {
@@ -297,7 +265,7 @@ async fn main() {
                 update: Status::Processed,
             };
             let from = handler.from();
-            let watch_pipeline = WatchPipeline::with_update(from.clone());
+            let watch_pipeline = FilterBuilder::new().with_update(from.clone());
             let x = Consumer::new(collection, watch_pipeline.build(), handler);
             x.consume().await;
         }
@@ -316,7 +284,14 @@ async fn main() {
                     ]
             },
             }];
-            let watch_pipeline = WatchPipeline::with_raw_pipeline(raw_pipeline);
+
+            let from_status = bson::ser::to_bson(handler.from()).unwrap();
+            let custom_prewatch_filter = doc! {"status.tag": from_status};
+
+            let watch_pipeline = FilterBuilder::new()
+                .with_raw_watcher_pipeline(raw_pipeline)
+                .with_raw_pre_watcher_filter(custom_prewatch_filter);
+
             let x = Consumer::new(collection, watch_pipeline.build(), handler);
             x.consume().await;
         }

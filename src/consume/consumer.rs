@@ -1,9 +1,13 @@
 use std::collections::{BTreeSet, HashSet};
 
+use super::filter::Filter;
+use super::Consume;
+use crate::process::Process;
 use crate::request::{RequestT, StatusT};
-use crate::{api::cid::Cid, process::Process};
+
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
+use mongodb::bson::oid::ObjectId;
 use mongodb::bson::{self, doc};
 use mongodb::options::{ChangeStreamOptions, FullDocumentType};
 use mongodb::{bson::Document, Collection};
@@ -14,11 +18,8 @@ use crate::UPDATES_NUM;
 pub(crate) struct Consumer<H: Process, D: RequestT> {
     collection: Collection<D>,
     watch_pipeline: Vec<Document>,
+    pre_watch_filter: Document,
     handler: H,
-}
-
-pub(crate) trait Consume {
-    async fn consume(&self);
 }
 
 impl<H, R> Consume for Consumer<H, R>
@@ -36,14 +37,18 @@ where
     H: Process<R = R>,
     R: RequestT,
 {
-    pub(crate) fn new(
-        collection: Collection<R>,
-        watch_pipeline: Vec<Document>,
-        handler: H,
-    ) -> Self {
+    pub(crate) fn new(collection: Collection<R>, filter: Filter, handler: H) -> Self {
+        let pre_watch_filter = if filter.pre_watch_filter.is_none() {
+            let from_status = bson::ser::to_bson(handler.from()).unwrap();
+            doc! {"status.tag": from_status}
+        } else {
+            filter.pre_watch_filter.unwrap()
+        };
+
         Self {
             collection,
-            watch_pipeline,
+            watch_pipeline: filter.watch_pipeline,
+            pre_watch_filter,
             handler,
         }
     }
@@ -52,7 +57,7 @@ where
         &self,
         updated: R,
         is_prewatched: bool,
-        hash_set: &mut HashSet<Cid>,
+        hash_set: &mut HashSet<ObjectId>,
         ord_time: &mut BTreeSet<DateTime<Utc>>,
     ) {
         if let Some(accepted_at) = ord_time.last() {
@@ -64,9 +69,13 @@ where
         ord_time.insert(updated.accepted_at().to_owned());
 
         if is_prewatched {
-            hash_set.insert(updated.cid().to_owned());
-        } else if hash_set.contains(updated.cid()) {
-            tracing::info!("Ignored duplicate data, cid: {:?}", updated.cid());
+            hash_set.insert(updated.oid().to_owned());
+        } else if hash_set.contains(updated.oid()) {
+            tracing::info!(
+                "Ignored duplicate data, oid: {:?}, cid: {:?}",
+                updated.oid(),
+                updated.cid()
+            );
             return;
         } else if !hash_set.is_empty() {
             tracing::info!("Clear hash cache, no duplicates");
@@ -116,12 +125,15 @@ where
             .await
             .unwrap();
 
-        let from_status = bson::ser::to_bson(self.handler.from()).unwrap();
-        let name = from_status;
-        let filter = doc! {"status.tag": name};
-
-        tracing::debug!("Initiating pre-watched data, filter: {filter:?}");
-        let mut pre_watched_data = self.collection.find(filter, None).await.unwrap();
+        tracing::debug!(
+            "Initiating pre-watched data, filter: {:?}",
+            self.pre_watch_filter
+        );
+        let mut pre_watched_data = self
+            .collection
+            .find(self.pre_watch_filter.clone(), None)
+            .await
+            .unwrap();
 
         let mut ord_time = BTreeSet::new();
 

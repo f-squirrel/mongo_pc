@@ -21,12 +21,12 @@ where
     type Request = R;
 
     async fn produce(&self, data: impl Into<Self::Request>) {
-        let span = span!(Level::INFO, "request");
+        let data = data.into();
+        let span = span!(Level::INFO, "request", cid = data.cid().to_string());
         let _enter = span.enter();
 
-        let data = data.into();
-        tracing::trace!("Received request: {:?}", data);
+        tracing::trace!("Received: {:?}", data);
         self.collection.insert_one(&data, None).await.unwrap();
-        tracing::trace!("Produced request: {:?}", data);
+        tracing::trace!("Produced: {:?}", data);
     }
 }
