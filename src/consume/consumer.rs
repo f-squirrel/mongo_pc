@@ -13,6 +13,8 @@ use mongodb::options::{ChangeStreamOptions, FullDocumentType};
 use mongodb::{bson::Document, Collection};
 use tracing::{span, Level};
 
+const ORDER_TRACKING_PERIOD: chrono::Duration = chrono::Duration::seconds(60);
+
 pub(crate) struct Consumer<P: Process, R: RequestT> {
     collection: Collection<R>,
     watch_pipeline: Vec<Document>,
@@ -65,6 +67,7 @@ where
             }
         }
 
+        ord_time.retain(|&x| x > Utc::now() - ORDER_TRACKING_PERIOD);
         ord_time.insert(updated.accepted_at().to_owned());
 
         if is_prewatched {
