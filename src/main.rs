@@ -214,6 +214,10 @@ async fn produce(producer: impl Produce<Request = Request>, payload_size: usize)
     tracing::info!("Producing data");
     let start = time::Instant::now();
     for _i in 0..UPDATES_NUM {
+        if let Some(sleep) = PRODUCE_SLEEP {
+            tracing::info!("Producer sleep for {:?}", sleep);
+            time::sleep(sleep).await;
+        }
         let payload = generate_string_of_byte_length(payload_size);
         let data = Request::new(payload);
         producer.produce(data).await;
