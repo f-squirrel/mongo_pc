@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use super::filter::Filter;
-use super::Consume;
+use super::Watch;
 use crate::process::Process;
 use crate::request::{RequestT, StatusQueryT, StatusT};
 
@@ -15,24 +15,24 @@ use tracing::{span, Level};
 
 const ORDER_TRACKING_PERIOD: chrono::Duration = chrono::Duration::seconds(60);
 
-pub(crate) struct Consumer<P: Process, R: RequestT> {
+pub(crate) struct Watcher<P: Process, R: RequestT> {
     collection: Collection<R>,
     watch_pipeline: Vec<Document>,
     pre_watch_filter: Document,
     handler: P,
 }
 
-impl<H, R> Consume for Consumer<H, R>
+impl<H, R> Watch for Watcher<H, R>
 where
     H: Process<R = R>,
     R: RequestT,
 {
-    async fn consume(&self) {
+    async fn watch(&self) {
         self.consume().await;
     }
 }
 
-impl<H, R> Consumer<H, R>
+impl<H, R> Watcher<H, R>
 where
     H: Process<R = R>,
     R: RequestT,

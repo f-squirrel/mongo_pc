@@ -1,17 +1,17 @@
 pub(crate) mod api;
-pub(crate) mod consume;
 pub(crate) mod process;
 pub(crate) mod produce;
 pub(crate) mod request;
+pub(crate) mod watch;
 
-use crate::consume::{Consume, Consumer};
+use crate::watch::{Watch, Watcher};
+use watch::filter::Filter;
 
 use std::{fmt::Debug, time::Duration};
 
 use api::cid::Cid;
 
 use chrono::{serde::ts_milliseconds, DateTime, Utc};
-use consume::filter::Filter;
 use derive_getters::Getters;
 
 use mongodb::bson::{self, doc, oid::ObjectId};
@@ -260,8 +260,8 @@ async fn main() {
                 update: Status::Approved(Approver("approver".to_string())),
             };
 
-            let x = Consumer::new(collection, Filter::builder().with_insert().build(), handler);
-            x.consume().await;
+            let x = Watcher::new(collection, Filter::builder().with_insert().build(), handler);
+            x.watch().await;
         }
         "consumer2" => {
             let handler = DemoHandler {
@@ -271,8 +271,8 @@ async fn main() {
             };
             let from = handler.from();
             let watch_pipeline = Filter::builder().with_update(from.clone());
-            let x = Consumer::new(collection, watch_pipeline.build(), handler);
-            x.consume().await;
+            let x = Watcher::new(collection, watch_pipeline.build(), handler);
+            x.watch().await;
         }
         "consumer3" => {
             let handler = DemoHandler {
@@ -297,8 +297,8 @@ async fn main() {
                 .with_raw_watcher_pipeline(raw_pipeline)
                 .with_raw_pre_watcher_filter(custom_prewatch_filter);
 
-            let x = Consumer::new(collection, watch_pipeline.build(), handler);
-            x.consume().await;
+            let x = Watcher::new(collection, watch_pipeline.build(), handler);
+            x.watch().await;
         }
         _ => panic!("Invalid type provided."),
     }
