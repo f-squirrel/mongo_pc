@@ -13,8 +13,6 @@ use mongodb::options::{ChangeStreamOptions, FullDocumentType};
 use mongodb::{bson::Document, Collection};
 use tracing::{span, Level};
 
-use crate::UPDATES_NUM;
-
 pub(crate) struct Consumer<P: Process, R: RequestT> {
     collection: Collection<R>,
     watch_pipeline: Vec<Document>,
@@ -39,7 +37,8 @@ where
 {
     pub(crate) fn new(collection: Collection<R>, filter: Filter, handler: H) -> Self {
         let pre_watch_filter = if filter.pre_watch_filter.is_none() {
-            let from_status = bson::ser::to_bson(handler.from()).unwrap();
+            let from_status =
+                bson::ser::to_bson(handler.from()).expect("Failed to serialize 'from' status");
             doc! {handler.from().query_id(): from_status}
         } else {
             filter.pre_watch_filter.unwrap()
@@ -100,7 +99,8 @@ where
             self.handler.to(),
         );
 
-        let updated_document = bson::to_document(&updated).unwrap();
+        let updated_document =
+            bson::to_document(&updated).expect("Failed to serialized processed document");
         let query = doc! { "_id" : updated.oid() };
         let updated_doc = doc! {
             "$set": updated_document
@@ -109,7 +109,7 @@ where
         self.collection
             .update_one(query, updated_doc, None)
             .await
-            .unwrap();
+            .expect("Failed to update document");
     }
 
     async fn consume(&self) {
@@ -123,7 +123,7 @@ where
             .collection
             .watch(self.watch_pipeline.clone(), opts)
             .await
-            .unwrap();
+            .expect("Failed to create change stream");
 
         tracing::debug!(
             "Initiating pre-watched data, filter: {:?}",
@@ -133,13 +133,18 @@ where
             .collection
             .find(self.pre_watch_filter.clone(), None)
             .await
-            .unwrap();
+            .expect("Failed to look for pre-watched data");
 
         let mut ord_time = BTreeSet::new();
 
         let mut hash_set = HashSet::new();
         let mut i = 0;
-        while let Some(doc) = pre_watched_data.next().await.transpose().unwrap() {
+        while let Some(doc) = pre_watched_data
+            .next()
+            .await
+            .transpose()
+            .expect("Failed to get document")
+        {
             let span = span!(Level::INFO, "request", cid = doc.cid().to_string());
             let _enter = span.enter();
 
@@ -154,14 +159,19 @@ where
         tracing::info!("Watching for updates");
 
         let mut i = 0;
-        while let Some(event) = update_change_stream.next().await.transpose().unwrap() {
+        while let Some(event) = update_change_stream
+            .next()
+            .await
+            .transpose()
+            .expect("Failed to get change event")
+        {
             tracing::debug!(
                 "Update performed: {:?}, full document: {:?}",
                 event.update_description,
                 event.full_document
             );
 
-            let updated = event.full_document.unwrap();
+            let updated = event.full_document.expect("Failed to get full document");
 
             let span = span!(Level::INFO, "request", cid = updated.cid().to_string());
             let _enter = span.enter();
@@ -171,10 +181,6 @@ where
                 .await;
 
             i += 1;
-            if i >= UPDATES_NUM {
-                tracing::info!("Processed all updates");
-                break;
-            }
         }
         tracing::info!("Consumed {i}, no more updates");
     }
