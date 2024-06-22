@@ -20,7 +20,7 @@ pub(crate) trait RequestT:
 }
 
 pub(crate) trait StatusQueryT: Serialize + DeserializeOwned + Debug {
-    fn watch_id(&self) -> &str;
+    fn query_id(&self) -> &str;
 }
 
 pub(crate) trait StatusT: Serialize + DeserializeOwned + Debug {

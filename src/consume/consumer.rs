@@ -40,7 +40,7 @@ where
     pub(crate) fn new(collection: Collection<R>, filter: Filter, handler: H) -> Self {
         let pre_watch_filter = if filter.pre_watch_filter.is_none() {
             let from_status = bson::ser::to_bson(handler.from()).unwrap();
-            doc! {handler.from().watch_id(): from_status}
+            doc! {handler.from().query_id(): from_status}
         } else {
             filter.pre_watch_filter.unwrap()
         };

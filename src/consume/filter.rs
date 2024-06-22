@@ -51,7 +51,7 @@ impl FilterBuilder {
     }
 
     pub(crate) fn with_update(self, expected_status: impl StatusQueryT) -> Self {
-        let watch_id = expected_status.watch_id();
+        let watch_id = expected_status.query_id();
         let from_status = bson::ser::to_bson(&expected_status).unwrap();
         let pipeline = vec![doc! {
             "$match": {

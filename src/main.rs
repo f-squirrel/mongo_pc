@@ -92,7 +92,7 @@ enum StatusQuery {
 }
 
 impl StatusQueryT for StatusQuery {
-    fn watch_id(&self) -> &str {
+    fn query_id(&self) -> &str {
         "status.tag"
     }
 }
