@@ -91,7 +91,11 @@ enum StatusQuery {
     Finalized,
 }
 
-impl StatusQueryT for StatusQuery {}
+impl StatusQueryT for StatusQuery {
+    fn watch_id(&self) -> &str {
+        "status.tag"
+    }
+}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Getters)]
 #[serde(rename_all = "snake_case")]

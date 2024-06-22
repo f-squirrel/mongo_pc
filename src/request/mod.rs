@@ -19,7 +19,9 @@ pub(crate) trait RequestT:
     fn payload(&self) -> &Self::Payload;
 }
 
-pub(crate) trait StatusQueryT: Serialize + DeserializeOwned + Debug {}
+pub(crate) trait StatusQueryT: Serialize + DeserializeOwned + Debug {
+    fn watch_id(&self) -> &str;
+}
 
 pub(crate) trait StatusT: Serialize + DeserializeOwned + Debug {
     type Query: StatusQueryT;

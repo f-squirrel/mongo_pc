@@ -51,12 +51,12 @@ impl FilterBuilder {
     }
 
     pub(crate) fn with_update(self, expected_status: impl StatusQueryT) -> Self {
+        let watch_id = expected_status.watch_id();
         let from_status = bson::ser::to_bson(&expected_status).unwrap();
-        let name = from_status;
         let pipeline = vec![doc! {
             "$match": {
                 "$and": [
-                { "updateDescription.updatedFields.status.tag": { "$eq": name} },
+                { format!("updateDescription.updatedFields.{watch_id}"): { "$eq": from_status} },
                 { "operationType": "update" },
                 ]
         },

@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, HashSet};
 use super::filter::Filter;
 use super::Consume;
 use crate::process::Process;
-use crate::request::{RequestT, StatusT};
+use crate::request::{RequestT, StatusQueryT, StatusT};
 
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
@@ -40,7 +40,7 @@ where
     pub(crate) fn new(collection: Collection<R>, filter: Filter, handler: H) -> Self {
         let pre_watch_filter = if filter.pre_watch_filter.is_none() {
             let from_status = bson::ser::to_bson(handler.from()).unwrap();
-            doc! {"status.tag": from_status}
+            doc! {handler.from().watch_id(): from_status}
         } else {
             filter.pre_watch_filter.unwrap()
         };
