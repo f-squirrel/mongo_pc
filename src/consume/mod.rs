@@ -6,4 +6,3 @@ pub(crate) trait Consume {
 }
 
 pub(crate) use consumer::Consumer;
-pub(crate) use filter::FilterBuilder;

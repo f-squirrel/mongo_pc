@@ -11,7 +11,7 @@ use std::{fmt::Debug, time::Duration};
 use api::cid::Cid;
 
 use chrono::{serde::ts_milliseconds, DateTime, Utc};
-use consume::FilterBuilder;
+use consume::filter::Filter;
 use derive_getters::Getters;
 
 use mongodb::bson::{self, doc, oid::ObjectId};
@@ -51,9 +51,9 @@ impl From<String> for Approver {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Desitnation(String);
+struct Destination(String);
 
-impl From<String> for Desitnation {
+impl From<String> for Destination {
     fn from(s: String) -> Self {
         Self(s)
     }
@@ -63,7 +63,7 @@ impl From<String> for Desitnation {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "tag", content = "content")]
 enum Status {
-    Pending(Desitnation),
+    Pending(Destination),
     Approved(Approver),
     Processed,
     Finalized,
@@ -122,7 +122,7 @@ impl Request {
             cid,
             accepted_at: Utc::now(),
             payload: payload.into(),
-            status: Status::Pending(Desitnation("sender".to_string())),
+            status: Status::Pending(Destination("sender".to_string())),
             unique_req_data,
         }
     }
@@ -136,7 +136,7 @@ impl Request {
             cid,
             accepted_at: Utc::now(),
             payload: payload.into(),
-            status: Status::Pending(Desitnation("sender".to_string())),
+            status: Status::Pending(Destination("sender".to_string())),
             unique_req_data,
         }
     }
@@ -174,6 +174,7 @@ struct DemoHandler {
 
 impl Process for DemoHandler {
     type R = Request;
+
     fn from(&self) -> &StatusQuery {
         &self.from
     }
@@ -251,11 +252,7 @@ async fn main() {
                 update: Status::Approved(Approver("approver".to_string())),
             };
 
-            let x = Consumer::new(
-                collection,
-                FilterBuilder::new().with_insert().build(),
-                handler,
-            );
+            let x = Consumer::new(collection, Filter::builder().with_insert().build(), handler);
             x.consume().await;
         }
         "consumer2" => {
@@ -265,7 +262,7 @@ async fn main() {
                 update: Status::Processed,
             };
             let from = handler.from();
-            let watch_pipeline = FilterBuilder::new().with_update(from.clone());
+            let watch_pipeline = Filter::builder().with_update(from.clone());
             let x = Consumer::new(collection, watch_pipeline.build(), handler);
             x.consume().await;
         }
@@ -288,7 +285,7 @@ async fn main() {
             let from_status = bson::ser::to_bson(handler.from()).unwrap();
             let custom_prewatch_filter = doc! {"status.tag": from_status};
 
-            let watch_pipeline = FilterBuilder::new()
+            let watch_pipeline = Filter::builder()
                 .with_raw_watcher_pipeline(raw_pipeline)
                 .with_raw_pre_watcher_filter(custom_prewatch_filter);
 

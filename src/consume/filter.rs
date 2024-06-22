@@ -7,13 +7,19 @@ pub(crate) struct Filter {
     pub(crate) pre_watch_filter: Option<Document>,
 }
 
+impl Filter {
+    pub(crate) fn builder() -> FilterBuilder {
+        FilterBuilder::new()
+    }
+}
+
 pub(crate) struct FilterBuilder {
     watch_pipeline: Vec<Document>,
     pre_watch_filter: Option<Document>,
 }
 
 impl FilterBuilder {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             watch_pipeline: Vec::new(),
             pre_watch_filter: None,

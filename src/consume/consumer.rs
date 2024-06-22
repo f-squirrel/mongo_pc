@@ -15,11 +15,11 @@ use tracing::{span, Level};
 
 use crate::UPDATES_NUM;
 
-pub(crate) struct Consumer<H: Process, D: RequestT> {
-    collection: Collection<D>,
+pub(crate) struct Consumer<P: Process, R: RequestT> {
+    collection: Collection<R>,
     watch_pipeline: Vec<Document>,
     pre_watch_filter: Document,
-    handler: H,
+    handler: P,
 }
 
 impl<H, R> Consume for Consumer<H, R>
@@ -83,8 +83,8 @@ where
         }
 
         assert_eq!(
-            std::mem::discriminant(&updated.status().to_query()),
             std::mem::discriminant(self.handler.from()),
+            std::mem::discriminant(&updated.status().to_query()),
             "Received status: {:?}, expected: {:?}",
             updated.status().to_query(),
             self.handler.from(),
