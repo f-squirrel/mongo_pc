@@ -25,11 +25,11 @@ use tokio::time;
 use tracing::{self};
 use tracing_subscriber::EnvFilter;
 
-const UPDATES_NUM: usize = 1000;
-// const PRODUCE_DELAY: Option<Duration> = Some(time::Duration::from_secs(10));
+const UPDATES_NUM: usize = 100000;
+
 const PRODUCE_DELAY: Option<Duration> = None;
 // const CONSUME_DELAY: Option<Duration> = Some(time::Duration::from_secs(10));
-const PRODUCE_SLEEP: Option<Duration> = Some(Duration::from_millis(50));
+const PRODUCE_SLEEP: Option<Duration> = Some(Duration::from_millis(100));
 const PAYLOAD_SIZE_BYTES: usize = 1024;
 
 #[derive(Debug, StructOpt)]

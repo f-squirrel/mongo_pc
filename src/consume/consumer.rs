@@ -136,7 +136,11 @@ where
             .collection
             .find(self.pre_watch_filter.clone(), None)
             .await
-            .expect("Failed to look for pre-watched data");
+            .or_else(|e| {
+                tracing::error!("Failed to look for pre-watched data: {:?}", e);
+                Err(e)
+            })
+            .unwrap();
 
         let mut ord_time = BTreeSet::new();
 
@@ -146,7 +150,11 @@ where
             .next()
             .await
             .transpose()
-            .expect("Failed to get document")
+            .or_else(|e| {
+                tracing::error!("Failed to receive document: {:?}", e);
+                Err(e)
+            })
+            .unwrap()
         {
             let span = span!(Level::INFO, "request", cid = doc.cid().to_string());
             let _enter = span.enter();
@@ -162,11 +170,16 @@ where
         tracing::info!("Watching for updates");
 
         let mut i = 0;
+
         while let Some(event) = update_change_stream
             .next()
             .await
             .transpose()
-            .expect("Failed to get change event")
+            .or_else(|e| {
+                tracing::error!("Failed to receive change event: {:?}", e);
+                Err(e)
+            })
+            .unwrap()
         {
             tracing::debug!(
                 "Update performed: {:?}, full document: {:?}",
@@ -185,6 +198,6 @@ where
 
             i += 1;
         }
-        tracing::info!("Consumed {i}, no more updates");
+        tracing::info!("Change stream was closed, consumed {i}, exiting");
     }
 }

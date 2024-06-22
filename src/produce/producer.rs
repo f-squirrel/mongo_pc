@@ -26,7 +26,14 @@ where
         let _enter = span.enter();
 
         tracing::trace!("Received: {:?}", data);
-        self.collection.insert_one(&data, None).await.unwrap();
+        self.collection
+            .insert_one(&data, None)
+            .await
+            .or_else(|e| {
+                tracing::error!("Failed to produce document: {:?}", e);
+                Err(e)
+            })
+            .unwrap();
         tracing::trace!("Produced: {:?}", data);
     }
 }
