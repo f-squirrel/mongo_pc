@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashSet};
 
 use super::filter::Filter;
@@ -20,6 +21,8 @@ pub(crate) struct Watcher<P: Process, R: RequestT> {
     watch_pipeline: Vec<Document>,
     pre_watch_filter: Document,
     handler: P,
+    processed_data_id: RefCell<HashSet<ObjectId>>,
+    processed_data_time: RefCell<BTreeSet<DateTime<Utc>>>,
 }
 
 impl<H, R> Watch for Watcher<H, R>
@@ -51,37 +54,39 @@ where
             watch_pipeline: filter.watch_pipeline,
             pre_watch_filter,
             handler,
+            processed_data_id: RefCell::new(HashSet::new()),
+            processed_data_time: RefCell::new(BTreeSet::new()),
         }
     }
 
-    async fn handle_update(
-        &self,
-        updated: R,
-        is_prewatched: bool,
-        hash_set: &mut HashSet<ObjectId>,
-        ord_time: &mut BTreeSet<DateTime<Utc>>,
-    ) {
-        if let Some(accepted_at) = ord_time.last() {
+    async fn handle_update(&self, updated: R, is_prewatched: bool) {
+        if let Some(accepted_at) = self.processed_data_time.borrow_mut().last() {
             if updated.accepted_at() < accepted_at {
                 tracing::warn!("Out of order data: {:?}", updated)
             }
         }
 
-        ord_time.retain(|&x| x > Utc::now() - ORDER_TRACKING_PERIOD);
-        ord_time.insert(updated.accepted_at().to_owned());
+        self.processed_data_time
+            .borrow_mut()
+            .retain(|&x| x > Utc::now() - ORDER_TRACKING_PERIOD);
+        self.processed_data_time
+            .borrow_mut()
+            .insert(updated.accepted_at().to_owned());
 
         if is_prewatched {
-            hash_set.insert(updated.oid().to_owned());
-        } else if hash_set.contains(updated.oid()) {
+            self.processed_data_id
+                .borrow_mut()
+                .insert(updated.oid().to_owned());
+        } else if self.processed_data_id.borrow_mut().contains(updated.oid()) {
             tracing::info!(
                 "Ignored duplicate data, oid: {:?}, cid: {:?}",
                 updated.oid(),
                 updated.cid()
             );
             return;
-        } else if !hash_set.is_empty() {
+        } else if !self.processed_data_id.borrow_mut().is_empty() {
             tracing::info!("Clear hash cache, no duplicates");
-            hash_set.clear();
+            self.processed_data_id.borrow_mut().clear();
         }
 
         assert_eq!(
@@ -136,23 +141,20 @@ where
             .collection
             .find(self.pre_watch_filter.clone(), None)
             .await
-            .or_else(|e| {
+            .map_err(|e| {
                 tracing::error!("Failed to look for pre-watched data: {:?}", e);
-                Err(e)
+                e
             })
             .unwrap();
 
-        let mut ord_time = BTreeSet::new();
-
-        let mut hash_set = HashSet::new();
         let mut i = 0;
         while let Some(doc) = pre_watched_data
             .next()
             .await
             .transpose()
-            .or_else(|e| {
+            .map_err(|e| {
                 tracing::error!("Failed to receive document: {:?}", e);
-                Err(e)
+                e
             })
             .unwrap()
         {
@@ -160,8 +162,7 @@ where
             let _enter = span.enter();
 
             tracing::trace!("Pre-watched data: {:?}", doc);
-            self.handle_update(doc, true, &mut hash_set, &mut ord_time)
-                .await;
+            self.handle_update(doc, true).await;
             i += 1;
         }
 
@@ -175,9 +176,9 @@ where
             .next()
             .await
             .transpose()
-            .or_else(|e| {
+            .map_err(|e| {
                 tracing::error!("Failed to receive change event: {:?}", e);
-                Err(e)
+                e
             })
             .unwrap()
         {
@@ -193,8 +194,7 @@ where
             let _enter = span.enter();
 
             tracing::trace!("Update performed: {:?}", event.update_description);
-            self.handle_update(updated, false, &mut hash_set, &mut ord_time)
-                .await;
+            self.handle_update(updated, false).await;
 
             i += 1;
         }

@@ -1,4 +1,5 @@
 pub(crate) mod api;
+pub(crate) mod handle;
 pub(crate) mod process;
 pub(crate) mod produce;
 pub(crate) mod request;

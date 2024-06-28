@@ -29,9 +29,9 @@ where
         self.collection
             .insert_one(&data, None)
             .await
-            .or_else(|e| {
+            .map_err(|e| {
                 tracing::error!("Failed to produce document: {:?}", e);
-                Err(e)
+                e
             })
             .unwrap();
         tracing::trace!("Produced: {:?}", data);
