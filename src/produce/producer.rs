@@ -1,3 +1,4 @@
+use log::warn;
 use mongodb::Collection;
 use tracing::{span, Level};
 
@@ -14,14 +15,16 @@ impl<R> Producer<R> {
     }
 }
 
+#[async_trait::async_trait]
 impl<R> Produce for Producer<R>
 where
     R: RequestT,
 {
     type Request = R;
 
-    async fn produce(&self, data: impl Into<Self::Request>) {
-        let data = data.into();
+    // async fn produce(&self, data: impl Into<Self::Request> + Send) {
+    async fn produce(&self, data: Self::Request) {
+        // let data = data.into();
         let span = span!(Level::INFO, "request", cid = data.cid().to_string());
         let _enter = span.enter();
 

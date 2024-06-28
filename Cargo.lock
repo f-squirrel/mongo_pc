@@ -839,6 +839,7 @@ dependencies = [
 name = "mongo_tput"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "derive-getters",
  "env_logger",

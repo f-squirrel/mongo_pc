@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashSet};
+use std::sync::Mutex;
 
 use super::Handle;
 use crate::process::Process;
@@ -21,45 +22,46 @@ enum Processor {
 pub(crate) struct Handler<P: Process, R: RequestT> {
     collection: Collection<R>,
     handler: P,
-    processed_data_id: RefCell<HashSet<ObjectId>>,
-    processed_data_time: RefCell<BTreeSet<DateTime<Utc>>>,
+    // processed_data_id: Mutex<RefCell<HashSet<ObjectId>>>,
+    // processed_data_time: Mutex<RefCell<BTreeSet<DateTime<Utc>>>>,
     _phantom: std::marker::PhantomData<R>,
 }
 
+#[async_trait::async_trait]
 impl<H, R> Handle<R> for Handler<H, R>
 where
     H: Process<R = R>,
     R: RequestT,
 {
     async fn handle(&self, updated: R, is_prewatched: bool) {
-        if let Some(accepted_at) = self.processed_data_time.borrow_mut().last() {
-            if updated.accepted_at() < accepted_at {
-                tracing::warn!("Out of order data: {:?}", updated)
-            }
-        }
+        // if let Some(accepted_at) = self.processed_data_time.get_mut().unwrap().last() {
+        //     if updated.accepted_at() < accepted_at {
+        //         tracing::warn!("Out of order data: {:?}", updated)
+        //     }
+        // }
 
-        self.processed_data_time
-            .borrow_mut()
-            .retain(|&x| x > Utc::now() - ORDER_TRACKING_PERIOD);
-        self.processed_data_time
-            .borrow_mut()
-            .insert(updated.accepted_at().to_owned());
+        // self.processed_data_time
+        //     .borrow_mut()
+        //     .retain(|&x| x > Utc::now() - ORDER_TRACKING_PERIOD);
+        // self.processed_data_time
+        //     .borrow_mut()
+        //     .insert(updated.accepted_at().to_owned());
 
-        if is_prewatched {
-            self.processed_data_id
-                .borrow_mut()
-                .insert(updated.oid().to_owned());
-        } else if self.processed_data_id.borrow_mut().contains(updated.oid()) {
-            tracing::info!(
-                "Ignored duplicate data, oid: {:?}, cid: {:?}",
-                updated.oid(),
-                updated.cid()
-            );
-            return;
-        } else if !self.processed_data_id.borrow_mut().is_empty() {
-            tracing::info!("Clear hash cache, no duplicates");
-            self.processed_data_id.borrow_mut().clear();
-        }
+        // if is_prewatched {
+        //     self.processed_data_id
+        //         .borrow_mut()
+        //         .insert(updated.oid().to_owned());
+        // } else if self.processed_data_id.borrow_mut().contains(updated.oid()) {
+        //     tracing::info!(
+        //         "Ignored duplicate data, oid: {:?}, cid: {:?}",
+        //         updated.oid(),
+        //         updated.cid()
+        //     );
+        //     return;
+        // } else if !self.processed_data_id.borrow_mut().is_empty() {
+        //     tracing::info!("Clear hash cache, no duplicates");
+        //     self.processed_data_id.borrow_mut().clear();
+        // }
 
         assert_eq!(
             std::mem::discriminant(self.handler.from()),

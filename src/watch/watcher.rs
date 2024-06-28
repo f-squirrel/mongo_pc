@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashSet};
+use std::sync::Mutex;
 
 use super::filter::Filter;
 use super::Watch;
@@ -21,10 +22,11 @@ pub(crate) struct Watcher<P: Process, R: RequestT> {
     watch_pipeline: Vec<Document>,
     pre_watch_filter: Document,
     handler: P,
-    processed_data_id: RefCell<HashSet<ObjectId>>,
-    processed_data_time: RefCell<BTreeSet<DateTime<Utc>>>,
+    // processed_data_id: Mutex<HashSet<ObjectId>>,
+    // processed_data_time: Mutex<BTreeSet<DateTime<Utc>>>,
 }
 
+#[async_trait::async_trait]
 impl<H, R> Watch for Watcher<H, R>
 where
     H: Process<R = R>,
@@ -54,40 +56,48 @@ where
             watch_pipeline: filter.watch_pipeline,
             pre_watch_filter,
             handler,
-            processed_data_id: RefCell::new(HashSet::new()),
-            processed_data_time: RefCell::new(BTreeSet::new()),
+            // processed_data_id: Mutex::new(HashSet::new()),
+            // processed_data_time: Mutex::new(BTreeSet::new()),
         }
     }
 
     async fn handle_update(&self, updated: R, is_prewatched: bool) {
-        if let Some(accepted_at) = self.processed_data_time.borrow_mut().last() {
-            if updated.accepted_at() < accepted_at {
-                tracing::warn!("Out of order data: {:?}", updated)
-            }
-        }
+        // if let Some(accepted_at) = self.processed_data_time.get_mut().unwrap().last() {
+        //     if updated.accepted_at() < accepted_at {
+        //         tracing::warn!("Out of order data: {:?}", updated)
+        //     }
+        // }
 
-        self.processed_data_time
-            .borrow_mut()
-            .retain(|&x| x > Utc::now() - ORDER_TRACKING_PERIOD);
-        self.processed_data_time
-            .borrow_mut()
-            .insert(updated.accepted_at().to_owned());
+        // self.processed_data_time
+        //     .get_mut()
+        //     .unwrap()
+        //     .retain(|&x| x > Utc::now() - ORDER_TRACKING_PERIOD);
+        // self.processed_data_time
+        //     .get_mut()
+        //     .unwrap()
+        //     .insert(updated.accepted_at().to_owned());
 
-        if is_prewatched {
-            self.processed_data_id
-                .borrow_mut()
-                .insert(updated.oid().to_owned());
-        } else if self.processed_data_id.borrow_mut().contains(updated.oid()) {
-            tracing::info!(
-                "Ignored duplicate data, oid: {:?}, cid: {:?}",
-                updated.oid(),
-                updated.cid()
-            );
-            return;
-        } else if !self.processed_data_id.borrow_mut().is_empty() {
-            tracing::info!("Clear hash cache, no duplicates");
-            self.processed_data_id.borrow_mut().clear();
-        }
+        // if is_prewatched {
+        //     self.processed_data_id
+        //         .get_mut()
+        //         .unwrap()
+        //         .insert(updated.oid().to_owned());
+        // } else if self
+        //     .processed_data_id
+        //     .get_mut()
+        //     .unwrap()
+        //     .contains(updated.oid())
+        // {
+        //     tracing::info!(
+        //         "Ignored duplicate data, oid: {:?}, cid: {:?}",
+        //         updated.oid(),
+        //         updated.cid()
+        //     );
+        //     return;
+        // } else if !self.processed_data_id.get_mut().unwrap().is_empty() {
+        //     tracing::info!("Clear hash cache, no duplicates");
+        //     self.processed_data_id.get_mut().unwrap().clear();
+        // }
 
         assert_eq!(
             std::mem::discriminant(self.handler.from()),

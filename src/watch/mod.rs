@@ -1,7 +1,8 @@
 pub(crate) mod filter;
 pub(crate) mod watcher;
 
-pub(crate) trait Watch {
+#[async_trait::async_trait]
+pub(crate) trait Watch: Sync + Send {
     async fn watch(&self);
 }
 

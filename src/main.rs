@@ -177,6 +177,7 @@ struct DemoHandler {
     update: Status,
 }
 
+#[async_trait::async_trait]
 impl Process for DemoHandler {
     type R = Request;
 
