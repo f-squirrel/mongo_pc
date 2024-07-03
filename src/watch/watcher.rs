@@ -35,7 +35,7 @@ where
         Self {
             processed_data_id: Mutex::new(RefCell::new(HashSet::new())),
             processed_data_time: Mutex::new(RefCell::new(BTreeSet::new())),
-            _phantom: std::marker::PhantomData::default(),
+            _phantom: std::marker::PhantomData,
         }
     }
 

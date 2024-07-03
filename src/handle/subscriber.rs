@@ -15,7 +15,7 @@ where
     pub(crate) fn new(handler: H) -> Self {
         Self {
             handler,
-            _phantom: std::marker::PhantomData::default(),
+            _phantom: std::marker::PhantomData,
         }
     }
 }
