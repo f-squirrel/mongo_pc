@@ -5,25 +5,87 @@ use std::sync::Mutex;
 use super::filter::Filter;
 use super::Watch;
 use crate::handle::Handle;
-use crate::process::Process;
-use crate::request::{RequestT, StatusQueryT, StatusT};
+use crate::request::RequestT;
 
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use mongodb::bson::oid::ObjectId;
-use mongodb::bson::{self, doc};
 use mongodb::options::{ChangeStreamOptions, FullDocumentType};
 use mongodb::{bson::Document, Collection};
 use tracing::{span, Level};
 
 const ORDER_TRACKING_PERIOD: chrono::Duration = chrono::Duration::seconds(60);
 
-// pub(crate) struct Watcher<P: Process, R: RequestT> {
+pub(crate) struct Jitter<R: RequestT> {
+    processed_data_id: Mutex<RefCell<HashSet<ObjectId>>>,
+    processed_data_time: Mutex<RefCell<BTreeSet<DateTime<Utc>>>>,
+    _phantom: std::marker::PhantomData<R>,
+}
+
+pub(crate) enum JitterError {
+    OutOfOrder,
+    Duplicate,
+}
+
+impl<R> Jitter<R>
+where
+    R: RequestT,
+{
+    pub(crate) fn new() -> Self {
+        Self {
+            processed_data_id: Mutex::new(RefCell::new(HashSet::new())),
+            processed_data_time: Mutex::new(RefCell::new(BTreeSet::new())),
+            _phantom: std::marker::PhantomData::default(),
+        }
+    }
+
+    pub(crate) fn on_request(&self, request: &R, is_prewatched: bool) -> Result<(), JitterError> {
+        if let Some(accepted_at) = self.processed_data_time.lock().unwrap().borrow().last() {
+            if request.accepted_at() < accepted_at {
+                return Err(JitterError::OutOfOrder);
+            }
+        }
+
+        self.processed_data_time
+            .lock()
+            .unwrap()
+            .borrow_mut()
+            .retain(|&x| x > Utc::now() - ORDER_TRACKING_PERIOD);
+        self.processed_data_time
+            .lock()
+            .unwrap()
+            .borrow_mut()
+            .insert(request.accepted_at().to_owned());
+
+        if is_prewatched {
+            self.processed_data_id
+                .lock()
+                .unwrap()
+                .borrow_mut()
+                .insert(request.oid().to_owned());
+        } else if self
+            .processed_data_id
+            .lock()
+            .unwrap()
+            .borrow()
+            .contains(request.oid())
+        {
+            return Err(JitterError::Duplicate);
+        } else if !self.processed_data_id.lock().unwrap().borrow().is_empty() {
+            tracing::info!("Clear hash cache, no duplicates");
+            self.processed_data_id.lock().unwrap().borrow_mut().clear();
+        }
+
+        Ok(())
+    }
+}
+
 pub(crate) struct Watcher<P: Handle<R>, R: RequestT> {
     collection: Collection<R>,
     watch_pipeline: Vec<Document>,
     pre_watch_filter: Document,
     handler: P,
+    jitter: Jitter<R>,
 }
 
 #[async_trait::async_trait]
@@ -48,6 +110,7 @@ where
             watch_pipeline: filter.watch_pipeline,
             pre_watch_filter: filter.pre_watch_filter.unwrap(),
             handler,
+            jitter: Jitter::new(),
         }
     }
 
@@ -93,8 +156,24 @@ where
             let _enter = span.enter();
 
             tracing::trace!("Pre-watched data: {:?}", doc);
-            self.handler.handle(doc, true).await;
-            i += 1;
+
+            match self.jitter.on_request(&doc, true) {
+                Ok(_) => {
+                    self.handler.handle(doc).await;
+                    i += 1;
+                }
+                Err(JitterError::OutOfOrder) => {
+                    tracing::warn!("Out of order data: {:?}", doc);
+                }
+                Err(JitterError::Duplicate) => {
+                    tracing::info!(
+                        "Ignored duplicate data, oid: {:?}, cid: {:?}",
+                        doc.oid(),
+                        doc.cid()
+                    );
+                    continue;
+                }
+            }
         }
 
         tracing::info!("Pre-watched data updated: {:?}", i);
@@ -123,8 +202,24 @@ where
             let _enter = span.enter();
 
             tracing::trace!("Update performed: {:?}", event.update_description);
-            self.handler.handle(updated, false).await;
-            i += 1;
+
+            match self.jitter.on_request(&updated, false) {
+                Ok(_) => {
+                    self.handler.handle(updated).await;
+                    i += 1;
+                }
+                Err(JitterError::OutOfOrder) => {
+                    tracing::warn!("Out of order data: {:?}", updated);
+                }
+                Err(JitterError::Duplicate) => {
+                    tracing::info!(
+                        "Ignored duplicate data, oid: {:?}, cid: {:?}",
+                        updated.oid(),
+                        updated.cid()
+                    );
+                    continue;
+                }
+            }
         }
         tracing::info!("Change stream was closed, consumed {i}, exiting");
     }
