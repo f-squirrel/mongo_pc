@@ -6,6 +6,7 @@ pub(crate) mod request;
 pub(crate) mod watch;
 
 use crate::watch::{Watch, Watcher};
+use handle::Handle;
 use watch::filter::Filter;
 
 use std::{fmt::Debug, time::Duration};
@@ -36,7 +37,7 @@ const PAYLOAD_SIZE_BYTES: usize = 1024;
 #[derive(Debug, StructOpt)]
 #[structopt(name = "mongo_tput", about = "Mongo throughput test")]
 struct Opt {
-    #[structopt(short = "t", long = "type", possible_values = &["producer", "consumer1", "consumer2", "consumer3"])]
+    #[structopt(short = "t", long = "type", possible_values = &["producer", "consumer1", "consumer2", "consumer3", "subscriber"])]
     type_: String,
     #[structopt(short = "m", long = "mongo", default_value = "mongodb://mongodb:27017")]
     mongo_uri: String,
@@ -197,6 +198,15 @@ impl Process for DemoHandler {
     }
 }
 
+struct DemoSubscriber {}
+
+#[async_trait::async_trait]
+impl Handle<Request> for DemoSubscriber {
+    async fn handle(&self, updated: Request) {
+        tracing::info!("Received: status: {:?}", updated.status());
+    }
+}
+
 fn generate_string_of_byte_length(byte_length: usize) -> String {
     // The sequence to repeat
     const SEQUENCE: &str = "DEADBEEF";
@@ -309,6 +319,26 @@ async fn main() {
             let handler = handle::handler::Handler::new(collection.clone(), processor);
 
             let x = Watcher::new(collection, watch_pipeline.build(), handler);
+            x.watch().await;
+        }
+        "subscriber" => {
+            let subsriber = DemoSubscriber {};
+            let raw_pipeline = vec![doc! {
+                "$match": {
+                    "$or": [
+                        { "operationType": "insert" },
+                        { "operationType": "update" },
+                    ]
+                },
+            }];
+
+            let custom_prewatch_filter = doc! {"status.tag": "exists"};
+
+            let watch_pipeline = Filter::builder()
+                .with_raw_watcher_pipeline(raw_pipeline)
+                .with_raw_pre_watcher_filter(custom_prewatch_filter);
+
+            let x = Watcher::new(collection, watch_pipeline.build(), subsriber);
             x.watch().await;
         }
         _ => panic!("Invalid type provided."),
