@@ -40,13 +40,24 @@ impl FilterBuilder {
         }
     }
 
-    pub(crate) fn with_insert(self) -> Self {
+    pub(crate) fn with_insert(self, expected_status: impl StatusQueryT) -> Self {
         let pipeline = vec![doc! {
             "$match" : doc! { "operationType" : "insert" },
         }];
-        Self {
-            watch_pipeline: pipeline,
-            ..self
+
+        let watch_id = expected_status.query_id();
+        let from_status = bson::ser::to_bson(&expected_status).unwrap();
+
+        if self.pre_watch_filter.is_none() {
+            Self {
+                watch_pipeline: pipeline,
+                pre_watch_filter: Some(doc! {watch_id: from_status}),
+            }
+        } else {
+            Self {
+                watch_pipeline: pipeline,
+                ..self
+            }
         }
     }
 
@@ -56,14 +67,22 @@ impl FilterBuilder {
         let pipeline = vec![doc! {
             "$match": {
                 "$and": [
-                { format!("updateDescription.updatedFields.{watch_id}"): { "$eq": from_status} },
+                { format!("updateDescription.updatedFields.{watch_id}"): { "$eq": &from_status} },
                 { "operationType": "update" },
                 ]
         },
         }];
-        Self {
-            watch_pipeline: pipeline,
-            ..self
+
+        if self.pre_watch_filter.is_none() {
+            Self {
+                watch_pipeline: pipeline,
+                pre_watch_filter: Some(doc! {watch_id: &from_status}),
+            }
+        } else {
+            Self {
+                watch_pipeline: pipeline,
+                ..self
+            }
         }
     }
 

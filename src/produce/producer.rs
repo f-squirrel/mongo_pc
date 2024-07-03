@@ -1,4 +1,3 @@
-use log::warn;
 use mongodb::Collection;
 use tracing::{span, Level};
 
@@ -28,7 +27,7 @@ where
         let span = span!(Level::INFO, "request", cid = data.cid().to_string());
         let _enter = span.enter();
 
-        tracing::trace!("Received: {:?}", data);
+        tracing::info!("Received: {:?}", data);
         self.collection
             .insert_one(&data, None)
             .await

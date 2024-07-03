@@ -256,32 +256,39 @@ async fn main() {
             produce(producer, PAYLOAD_SIZE_BYTES).await;
         }
         "consumer1" => {
-            let handler = DemoHandler {
+            let processor = DemoHandler {
                 from: StatusQuery::Pending,
                 to: StatusQuery::Approved,
                 update: Status::Approved(Approver("approver".to_string())),
             };
 
-            let x = Watcher::new(collection, Filter::builder().with_insert().build(), handler);
+            let filter = Filter::builder().with_insert(processor.from().to_owned());
+            let handler = handle::handler::Handler::new(collection.clone(), processor);
+
+            let x = Watcher::new(collection, filter.build(), handler);
             x.watch().await;
         }
         "consumer2" => {
-            let handler = DemoHandler {
+            let processor = DemoHandler {
                 from: StatusQuery::Approved,
                 to: StatusQuery::Processed,
                 update: Status::Processed,
             };
-            let from = handler.from();
-            let watch_pipeline = Filter::builder().with_update(from.clone());
-            let x = Watcher::new(collection, watch_pipeline.build(), handler);
+
+            let filter = Filter::builder().with_update(processor.from().to_owned());
+
+            let handler = handle::handler::Handler::new(collection.clone(), processor);
+
+            let x = Watcher::new(collection, filter.build(), handler);
             x.watch().await;
         }
         "consumer3" => {
-            let handler = DemoHandler {
+            let processor = DemoHandler {
                 from: StatusQuery::Processed,
                 to: StatusQuery::Finalized,
                 update: Status::Finalized,
             };
+
             // DD: Example of creating a raw pipeline
             let raw_pipeline = vec![doc! {
                 "$match": {
@@ -292,12 +299,14 @@ async fn main() {
             },
             }];
 
-            let from_status = bson::ser::to_bson(handler.from()).unwrap();
+            let from_status = bson::ser::to_bson(processor.from()).unwrap();
             let custom_prewatch_filter = doc! {"status.tag": from_status};
 
             let watch_pipeline = Filter::builder()
                 .with_raw_watcher_pipeline(raw_pipeline)
                 .with_raw_pre_watcher_filter(custom_prewatch_filter);
+
+            let handler = handle::handler::Handler::new(collection.clone(), processor);
 
             let x = Watcher::new(collection, watch_pipeline.build(), handler);
             x.watch().await;

@@ -4,6 +4,7 @@ use std::sync::Mutex;
 
 use super::filter::Filter;
 use super::Watch;
+use crate::handle::Handle;
 use crate::process::Process;
 use crate::request::{RequestT, StatusQueryT, StatusT};
 
@@ -17,19 +18,18 @@ use tracing::{span, Level};
 
 const ORDER_TRACKING_PERIOD: chrono::Duration = chrono::Duration::seconds(60);
 
-pub(crate) struct Watcher<P: Process, R: RequestT> {
+// pub(crate) struct Watcher<P: Process, R: RequestT> {
+pub(crate) struct Watcher<P: Handle<R>, R: RequestT> {
     collection: Collection<R>,
     watch_pipeline: Vec<Document>,
     pre_watch_filter: Document,
     handler: P,
-    // processed_data_id: Mutex<HashSet<ObjectId>>,
-    // processed_data_time: Mutex<BTreeSet<DateTime<Utc>>>,
 }
 
 #[async_trait::async_trait]
 impl<H, R> Watch for Watcher<H, R>
 where
-    H: Process<R = R>,
+    H: Handle<R>,
     R: RequestT,
 {
     async fn watch(&self) {
@@ -39,95 +39,16 @@ where
 
 impl<H, R> Watcher<H, R>
 where
-    H: Process<R = R>,
+    H: Handle<R>,
     R: RequestT,
 {
     pub(crate) fn new(collection: Collection<R>, filter: Filter, handler: H) -> Self {
-        let pre_watch_filter = if filter.pre_watch_filter.is_none() {
-            let from_status =
-                bson::ser::to_bson(handler.from()).expect("Failed to serialize 'from' status");
-            doc! {handler.from().query_id(): from_status}
-        } else {
-            filter.pre_watch_filter.unwrap()
-        };
-
         Self {
             collection,
             watch_pipeline: filter.watch_pipeline,
-            pre_watch_filter,
+            pre_watch_filter: filter.pre_watch_filter.unwrap(),
             handler,
-            // processed_data_id: Mutex::new(HashSet::new()),
-            // processed_data_time: Mutex::new(BTreeSet::new()),
         }
-    }
-
-    async fn handle_update(&self, updated: R, is_prewatched: bool) {
-        // if let Some(accepted_at) = self.processed_data_time.get_mut().unwrap().last() {
-        //     if updated.accepted_at() < accepted_at {
-        //         tracing::warn!("Out of order data: {:?}", updated)
-        //     }
-        // }
-
-        // self.processed_data_time
-        //     .get_mut()
-        //     .unwrap()
-        //     .retain(|&x| x > Utc::now() - ORDER_TRACKING_PERIOD);
-        // self.processed_data_time
-        //     .get_mut()
-        //     .unwrap()
-        //     .insert(updated.accepted_at().to_owned());
-
-        // if is_prewatched {
-        //     self.processed_data_id
-        //         .get_mut()
-        //         .unwrap()
-        //         .insert(updated.oid().to_owned());
-        // } else if self
-        //     .processed_data_id
-        //     .get_mut()
-        //     .unwrap()
-        //     .contains(updated.oid())
-        // {
-        //     tracing::info!(
-        //         "Ignored duplicate data, oid: {:?}, cid: {:?}",
-        //         updated.oid(),
-        //         updated.cid()
-        //     );
-        //     return;
-        // } else if !self.processed_data_id.get_mut().unwrap().is_empty() {
-        //     tracing::info!("Clear hash cache, no duplicates");
-        //     self.processed_data_id.get_mut().unwrap().clear();
-        // }
-
-        assert_eq!(
-            std::mem::discriminant(self.handler.from()),
-            std::mem::discriminant(&updated.status().to_query()),
-            "Received status: {:?}, expected: {:?}",
-            updated.status().to_query(),
-            self.handler.from(),
-        );
-
-        let updated = self.handler.process(updated).await;
-
-        assert_eq!(
-            std::mem::discriminant(&updated.status().to_query()),
-            std::mem::discriminant(self.handler.to()),
-            "Updated to status: {:?}, expected: {:?}",
-            updated.status().to_query(),
-            self.handler.to(),
-        );
-
-        let updated_document =
-            bson::to_document(&updated).expect("Failed to serialized processed document");
-        let query = doc! { "_id" : updated.oid() };
-        let updated_doc = doc! {
-            "$set": updated_document
-        };
-        tracing::debug!("Document updated: {:?}", updated_doc);
-        self.collection
-            .update_one(query, updated_doc, None)
-            .await
-            .expect("Failed to update document");
     }
 
     async fn consume(&self) {
@@ -168,19 +89,17 @@ where
             })
             .unwrap()
         {
-            let span = span!(Level::INFO, "request", cid = doc.cid().to_string());
+            let span = span!(Level::INFO, "consume", cid = doc.cid().to_string());
             let _enter = span.enter();
 
             tracing::trace!("Pre-watched data: {:?}", doc);
-            self.handle_update(doc, true).await;
+            self.handler.handle(doc, true).await;
             i += 1;
         }
 
         tracing::info!("Pre-watched data updated: {:?}", i);
 
         tracing::info!("Watching for updates");
-
-        let mut i = 0;
 
         while let Some(event) = update_change_stream
             .next()
@@ -200,12 +119,11 @@ where
 
             let updated = event.full_document.expect("Failed to get full document");
 
-            let span = span!(Level::INFO, "request", cid = updated.cid().to_string());
+            let span = span!(Level::INFO, "consume", cid = updated.cid().to_string());
             let _enter = span.enter();
 
             tracing::trace!("Update performed: {:?}", event.update_description);
-            self.handle_update(updated, false).await;
-
+            self.handler.handle(updated, false).await;
             i += 1;
         }
         tracing::info!("Change stream was closed, consumed {i}, exiting");

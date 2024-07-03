@@ -27,6 +27,20 @@ pub(crate) struct Handler<P: Process, R: RequestT> {
     _phantom: std::marker::PhantomData<R>,
 }
 
+impl<H, R> Handler<H, R>
+where
+    H: Process<R = R>, /*  + Handle<R> */
+    R: RequestT,
+{
+    pub(crate) fn new(collection: Collection<R>, handler: H) -> Self {
+        Self {
+            collection,
+            handler,
+            _phantom: std::marker::PhantomData::default(),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl<H, R> Handle<R> for Handler<H, R>
 where
