@@ -2,18 +2,18 @@ use mongodb::bson::{self, doc, Document};
 
 use crate::request::StatusQueryT;
 
-pub(crate) struct Filter {
-    pub(crate) watch_pipeline: Vec<Document>,
-    pub(crate) pre_watch_filter: Option<Document>,
+pub struct Filter {
+    pub watch_pipeline: Vec<Document>,
+    pub pre_watch_filter: Option<Document>,
 }
 
 impl Filter {
-    pub(crate) fn builder() -> FilterBuilder {
+    pub fn builder() -> FilterBuilder {
         FilterBuilder::new()
     }
 }
 
-pub(crate) struct FilterBuilder {
+pub struct FilterBuilder {
     watch_pipeline: Vec<Document>,
     pre_watch_filter: Option<Document>,
 }
@@ -26,21 +26,21 @@ impl FilterBuilder {
         }
     }
 
-    pub(crate) fn with_raw_watcher_pipeline(self, pipeline: Vec<Document>) -> Self {
+    pub fn with_raw_watcher_pipeline(self, pipeline: Vec<Document>) -> Self {
         Self {
             watch_pipeline: pipeline,
             ..self
         }
     }
 
-    pub(crate) fn with_raw_pre_watcher_filter(self, filter: Document) -> Self {
+    pub fn with_raw_pre_watcher_filter(self, filter: Document) -> Self {
         Self {
             pre_watch_filter: Some(filter),
             ..self
         }
     }
 
-    pub(crate) fn with_insert(self, expected_status: impl StatusQueryT) -> Self {
+    pub fn with_insert(self, expected_status: impl StatusQueryT) -> Self {
         let pipeline = vec![doc! {
             "$match" : doc! { "operationType" : "insert" },
         }];
@@ -61,7 +61,7 @@ impl FilterBuilder {
         }
     }
 
-    pub(crate) fn with_update(self, expected_status: impl StatusQueryT) -> Self {
+    pub fn with_update(self, expected_status: impl StatusQueryT) -> Self {
         let watch_id = expected_status.query_id();
         let from_status = bson::ser::to_bson(&expected_status).unwrap();
         let pipeline = vec![doc! {
@@ -86,7 +86,7 @@ impl FilterBuilder {
         }
     }
 
-    pub(crate) fn build(self) -> Filter {
+    pub fn build(self) -> Filter {
         Filter {
             watch_pipeline: self.watch_pipeline,
             pre_watch_filter: self.pre_watch_filter,

@@ -16,22 +16,31 @@ use tracing::{span, Level};
 
 const ORDER_TRACKING_PERIOD: chrono::Duration = chrono::Duration::seconds(60);
 
-pub(crate) struct Jitter<R: RequestT> {
+pub struct Jitter<R: RequestT> {
     processed_data_id: Mutex<RefCell<HashSet<ObjectId>>>,
     processed_data_time: Mutex<RefCell<BTreeSet<DateTime<Utc>>>>,
     _phantom: std::marker::PhantomData<R>,
 }
 
-pub(crate) enum JitterError {
+pub enum JitterError {
     OutOfOrder,
     Duplicate,
+}
+
+impl<R> Default for Jitter<R>
+where
+    R: RequestT,
+{
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<R> Jitter<R>
 where
     R: RequestT,
 {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             processed_data_id: Mutex::new(RefCell::new(HashSet::new())),
             processed_data_time: Mutex::new(RefCell::new(BTreeSet::new())),
@@ -39,7 +48,7 @@ where
         }
     }
 
-    pub(crate) fn on_request(&self, request: &R, is_prewatched: bool) -> Result<(), JitterError> {
+    pub fn on_request(&self, request: &R, is_prewatched: bool) -> Result<(), JitterError> {
         if let Some(accepted_at) = self.processed_data_time.lock().unwrap().borrow().last() {
             if request.accepted_at() < accepted_at {
                 return Err(JitterError::OutOfOrder);
@@ -80,7 +89,7 @@ where
     }
 }
 
-pub(crate) struct Watcher<P: Handle<R>, R: RequestT> {
+pub struct Watcher<P: Handle<R>, R: RequestT> {
     collection: Collection<R>,
     watch_pipeline: Vec<Document>,
     pre_watch_filter: Document,
@@ -104,7 +113,7 @@ where
     H: Handle<R>,
     R: RequestT,
 {
-    pub(crate) fn new(collection: Collection<R>, filter: Filter, handler: H) -> Self {
+    pub fn new(collection: Collection<R>, filter: Filter, handler: H) -> Self {
         Self {
             collection,
             watch_pipeline: filter.watch_pipeline,

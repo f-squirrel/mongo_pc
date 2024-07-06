@@ -5,7 +5,7 @@ use crate::request::{RequestT, StatusT};
 use mongodb::bson::{self, doc};
 use mongodb::Collection;
 
-pub(crate) struct Handler<P: Process, R: RequestT> {
+pub struct Handler<P: Process, R: RequestT> {
     collection: Collection<R>,
     handler: P,
     expected_output_statuses:
@@ -17,7 +17,7 @@ where
     H: Process<R = R>, /*  + Handle<R> */
     R: RequestT,
 {
-    pub(crate) fn new(collection: Collection<R>, handler: H) -> Self {
+    pub fn new(collection: Collection<R>, handler: H) -> Self {
         let expected_output_statuses: Vec<_> =
             handler.to().iter().map(std::mem::discriminant).collect();
 

@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct Cid(
+pub struct Cid(
     // simple: 284c153cc5a642c19555ad27d1792428
     // braced: {27288856-974f-445e-9d88-ca65472a675b}
     // urn: urn:uuid:582205a5-445b-4a48-af37-0cd266a2ee3a

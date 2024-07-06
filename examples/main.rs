@@ -1,13 +1,11 @@
-pub(crate) mod api;
-pub(crate) mod handle;
-pub(crate) mod process;
-pub(crate) mod produce;
-pub(crate) mod request;
-pub(crate) mod watch;
+extern crate mongo_tput;
 
-use crate::watch::{Watch, Watcher};
-use handle::Handle;
-use watch::filter::Filter;
+use mongo_tput::api;
+
+use mongo_tput::handle;
+use mongo_tput::handle::Handle;
+use mongo_tput::watch::filter::Filter;
+use mongo_tput::watch::{Watch, Watcher};
 
 use std::{fmt::Debug, time::Duration};
 
@@ -16,10 +14,11 @@ use api::cid::Cid;
 use chrono::{serde::ts_milliseconds, DateTime, Utc};
 use derive_getters::Getters;
 
+use mongo_tput::process::Process;
+use mongo_tput::produce;
+use mongo_tput::produce::{Produce, RequestT};
+use mongo_tput::request::{StatusQueryT, StatusT};
 use mongodb::bson::{self, doc, oid::ObjectId};
-use process::Process;
-use produce::{Produce, RequestT};
-use request::{StatusQueryT, StatusT};
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
 use tokio::time;

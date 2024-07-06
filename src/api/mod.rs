@@ -1,1 +1,1 @@
-pub(crate) mod cid;
+pub mod cid;

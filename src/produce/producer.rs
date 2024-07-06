@@ -4,12 +4,12 @@ use tracing::{span, Level};
 use super::Produce;
 use crate::request::RequestT;
 
-pub(crate) struct Producer<R> {
+pub struct Producer<R> {
     collection: Collection<R>,
 }
 
 impl<R> Producer<R> {
-    pub(crate) fn new(collection: Collection<R>) -> Self {
+    pub fn new(collection: Collection<R>) -> Self {
         Self { collection }
     }
 }

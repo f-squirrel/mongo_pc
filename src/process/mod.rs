@@ -1,7 +1,7 @@
 use crate::request::{RequestT, StatusT};
 
 #[async_trait::async_trait]
-pub(crate) trait Process: Send + Sync {
+pub trait Process: Send + Sync {
     type R: RequestT;
 
     // DD: Is it too overengineered?

@@ -1,9 +1,9 @@
-pub(crate) mod filter;
-pub(crate) mod watcher;
+pub mod filter;
+pub mod watcher;
 
 #[async_trait::async_trait]
-pub(crate) trait Watch: Sync + Send {
+pub trait Watch: Sync + Send {
     async fn watch(&self);
 }
 
-pub(crate) use watcher::Watcher;
+pub use watcher::Watcher;

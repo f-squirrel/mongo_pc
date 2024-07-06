@@ -6,9 +6,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::api::cid::Cid;
 
-pub(crate) trait RequestT:
-    DeserializeOwned + Serialize + Unpin + Send + Sync + Debug
-{
+pub trait RequestT: DeserializeOwned + Serialize + Unpin + Send + Sync + Debug {
     type Status: StatusT;
     type Payload;
 
@@ -19,11 +17,11 @@ pub(crate) trait RequestT:
     fn payload(&self) -> &Self::Payload;
 }
 
-pub(crate) trait StatusQueryT: Serialize + DeserializeOwned + Debug {
+pub trait StatusQueryT: Serialize + DeserializeOwned + Debug {
     fn query_id(&self) -> &str;
 }
 
-pub(crate) trait StatusT: Serialize + DeserializeOwned + Debug {
+pub trait StatusT: Serialize + DeserializeOwned + Debug {
     type Query: StatusQueryT;
 
     fn to_query(&self) -> Self::Query;
