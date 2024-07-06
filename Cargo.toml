@@ -6,21 +6,18 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde = { version = "1.0.203", "features" = ["derive"] }
-mongodb = "2.8.2"
-serde_yaml = "0.9.34"
-serde_derive = "1.0.203"
-tokio = { version = "1.37.0", features = ["full"] }
-log = "0.4.21"
-env_logger = "0.11.3"
-futures-util = "0.3.30"
-structopt = "0.3.26"
-uuid = "1.8.0"
-derive-getters = "0.4.0"
-chrono = { version = "0.4.38", features = ["serde"] }
-
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-log = "0.2"
-
 async-trait = "0.1.80"
+chrono = { version = "0.4.38", features = ["serde"] }
+futures-util = "0.3.30"
+mongodb = "2.8.2"
+serde = { version = "1.0.203", "features" = ["derive"] }
+serde_derive = "1.0.203"
+tracing = "0.1"
+uuid = "1.8.0"
+
+[dev-dependencies]
+derive-getters = "0.4.0"
+structopt = "0.3.26"
+tokio = { version = "1.37.0", features = ["full"] }
+tracing-log = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
