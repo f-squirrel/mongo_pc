@@ -6,7 +6,7 @@ pub(crate) trait Process: Send + Sync {
 
     // DD: Is it too overengineered?
     fn from(&self) -> &<<Self::R as RequestT>::Status as StatusT>::Query;
-    fn to(&self) -> &<<Self::R as RequestT>::Status as StatusT>::Query;
+    fn to(&self) -> &[<<Self::R as RequestT>::Status as StatusT>::Query];
 
     #[must_use]
     async fn process(&self, updated: Self::R) -> Self::R;

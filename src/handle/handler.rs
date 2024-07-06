@@ -8,6 +8,8 @@ use mongodb::Collection;
 pub(crate) struct Handler<P: Process, R: RequestT> {
     collection: Collection<R>,
     handler: P,
+    expected_output_statuses:
+        Vec<std::mem::Discriminant<<<R as RequestT>::Status as StatusT>::Query>>,
 }
 
 impl<H, R> Handler<H, R>
@@ -16,9 +18,13 @@ where
     R: RequestT,
 {
     pub(crate) fn new(collection: Collection<R>, handler: H) -> Self {
+        let expected_output_statuses: Vec<_> =
+            handler.to().iter().map(std::mem::discriminant).collect();
+
         Self {
             collection,
             handler,
+            expected_output_statuses,
         }
     }
 }
@@ -40,9 +46,9 @@ where
 
         let updated = self.handler.process(updated).await;
 
-        assert_eq!(
-            std::mem::discriminant(&updated.status().to_query()),
-            std::mem::discriminant(self.handler.to()),
+        let to_status = std::mem::discriminant(&updated.status().to_query());
+        assert!(
+            self.expected_output_statuses.contains(&to_status),
             "Updated to status: {:?}, expected: {:?}",
             updated.status().to_query(),
             self.handler.to(),

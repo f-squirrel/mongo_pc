@@ -174,7 +174,7 @@ impl RequestT for Request {
 
 struct DemoHandler {
     from: StatusQuery,
-    to: StatusQuery,
+    to: Vec<StatusQuery>,
     update: Status,
 }
 
@@ -186,7 +186,7 @@ impl Process for DemoHandler {
         &self.from
     }
 
-    fn to(&self) -> &StatusQuery {
+    fn to(&self) -> &[StatusQuery] {
         &self.to
     }
 
@@ -268,7 +268,7 @@ async fn main() {
         "consumer1" => {
             let processor = DemoHandler {
                 from: StatusQuery::Pending,
-                to: StatusQuery::Approved,
+                to: vec![StatusQuery::Approved],
                 update: Status::Approved(Approver("approver".to_string())),
             };
 
@@ -281,7 +281,7 @@ async fn main() {
         "consumer2" => {
             let processor = DemoHandler {
                 from: StatusQuery::Approved,
-                to: StatusQuery::Processed,
+                to: vec![StatusQuery::Processed],
                 update: Status::Processed,
             };
 
@@ -295,7 +295,7 @@ async fn main() {
         "consumer3" => {
             let processor = DemoHandler {
                 from: StatusQuery::Processed,
-                to: StatusQuery::Finalized,
+                to: vec![StatusQuery::Finalized],
                 update: Status::Finalized,
             };
 
