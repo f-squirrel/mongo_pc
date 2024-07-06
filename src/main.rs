@@ -27,7 +27,7 @@ use tokio::time;
 use tracing::{self};
 use tracing_subscriber::EnvFilter;
 
-const UPDATES_NUM: usize = 100000;
+const UPDATES_NUM: usize = 1000;
 
 const PRODUCE_DELAY: Option<Duration> = None;
 // const CONSUME_DELAY: Option<Duration> = Some(time::Duration::from_secs(10));
@@ -68,6 +68,7 @@ enum Status {
     Pending(Destination),
     Approved(Approver),
     Processed,
+    FailedToProcess(String),
     Finalized,
 }
 
@@ -79,6 +80,7 @@ impl StatusT for Status {
             Status::Pending(_) => StatusQuery::Pending,
             Status::Approved(_) => StatusQuery::Approved,
             Status::Processed => StatusQuery::Processed,
+            Status::FailedToProcess(_) => StatusQuery::FailedToProcess,
             Status::Finalized => StatusQuery::Finalized,
         }
     }
@@ -90,6 +92,7 @@ enum StatusQuery {
     Pending,
     Approved,
     Processed,
+    FailedToProcess,
     Finalized,
 }
 
@@ -198,6 +201,35 @@ impl Process for DemoHandler {
     }
 }
 
+struct UnstableProcessor {
+    from: StatusQuery,
+    to: Vec<StatusQuery>,
+}
+
+#[async_trait::async_trait]
+impl Process for UnstableProcessor {
+    type R = Request;
+
+    fn from(&self) -> &StatusQuery {
+        &self.from
+    }
+
+    fn to(&self) -> &[StatusQuery] {
+        &self.to
+    }
+
+    async fn process(&self, updated: Self::R) -> Self::R {
+        let mut updated = updated;
+        if updated.accepted_at().timestamp() % 2 == 0 {
+            updated.status = Status::Processed;
+        } else {
+            updated.status = Status::FailedToProcess("failed".to_string());
+        }
+        tracing::trace!("Req unique data: {}", updated.unique_req_data());
+        updated
+    }
+}
+
 struct DemoSubscriber {}
 
 #[async_trait::async_trait]
@@ -279,10 +311,9 @@ async fn main() {
             x.watch().await;
         }
         "consumer2" => {
-            let processor = DemoHandler {
+            let processor = UnstableProcessor {
                 from: StatusQuery::Approved,
-                to: vec![StatusQuery::Processed],
-                update: Status::Processed,
+                to: vec![StatusQuery::Processed, StatusQuery::FailedToProcess],
             };
 
             let filter = Filter::builder().with_update(processor.from().to_owned());
