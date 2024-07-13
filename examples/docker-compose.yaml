@@ -1,4 +1,3 @@
-
 version: '3.8'
 
 services:
@@ -7,9 +6,20 @@ services:
     init: true
     hostname: mongodb
     user: "${UID}:${GID}"
-    command: ["sh", "-c", "mongod --replSet rs0 --bind_ip_all --port 27017"]
+    command:
+      [
+        "sh",
+        "-c",
+        "mongod --replSet rs0 --bind_ip_all --port 27017"
+      ]
     healthcheck:
-      test: ["CMD", "sh", "-c", "echo 'try { rs.status() } catch (e) { rs.initiate({_id: \"rs0\", members: [{_id: 0, host: \"mongodb:27017\"}]}) }' | mongosh --quiet --port 27017"]
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "echo 'try { rs.status() } catch (e) { rs.initiate({_id: \"rs0\", members: [{_id: 0, host: \"mongodb:27017\"}]}) }' | mongosh --quiet --port 27017"
+        ]
       interval: 1s
       timeout: 10s
       start_period: 0s
@@ -31,21 +41,20 @@ services:
     cap_add:
       - SYS_PTRACE
     volumes:
-      - ./:/producer
+      - ../:/producer
     environment:
       - RUST_BACKTRACE=1
       - RUST_LOG=error
-    # networks:
-    #   inner:
-    #     ipv4_address: 2.2.2.60
+      # networks:
+      #   inner:
+      #     ipv4_address: 2.2.2.60
       # runtools_cluster_net:
-        # ipv4_address: 1.1.1.60
+      # ipv4_address: 1.1.1.60
     user: "${UID}:${GID}"
     ports:
       - 8082:8080
     working_dir: /producer
-    entrypoint: target/debug/mongo_tput -t producer
-
+    entrypoint: target/debug/examples/main -t producer
 
   consumer1:
     image: mongo_tput:lastest
@@ -58,29 +67,28 @@ services:
     # cap_add:
     #   - SYS_PTRACE
     volumes:
-      - ./:/consumer1
+      - ../:/consumer1
     environment:
       - RUST_BACKTRACE=1
       - RUST_LOG=error
     user: "${UID}:${GID}"
     working_dir: /consumer1
-    entrypoint: target/debug/mongo_tput -t consumer1
+    entrypoint: target/debug/examples/main -t consumer1
     depends_on:
       - mongodb
-
 
   consumer2:
     image: mongo_tput:lastest
     init: true
     hostname: consumer2
     volumes:
-      - ./:/consumer2
+      - ../:/consumer2
     environment:
       - RUST_BACKTRACE=full
       - RUST_LOG=error
     user: "${UID}:${GID}"
     working_dir: /consumer2
-    entrypoint: target/debug/mongo_tput -t consumer2
+    entrypoint: target/debug/examples/main -t consumer2
     depends_on:
       - mongodb
 
@@ -89,13 +97,13 @@ services:
     init: true
     hostname: consumer3
     volumes:
-      - ./:/consumer3
+      - ../:/consumer3
     environment:
       - RUST_BACKTRACE=full
       - RUST_LOG=error
     user: "${UID}:${GID}"
     working_dir: /consumer3
-    entrypoint: target/debug/mongo_tput -t consumer3
+    entrypoint: target/debug/examples/main -t consumer3
     depends_on:
       - mongodb
 
@@ -104,12 +112,12 @@ services:
     init: true
     hostname: consumer3
     volumes:
-      - ./:/consumer3
+      - ../:/consumer3
     environment:
       - RUST_BACKTRACE=full
       - RUST_LOG=info
     user: "${UID}:${GID}"
     working_dir: /consumer3
-    entrypoint: target/debug/mongo_tput -t subscriber
+    entrypoint: target/debug/examples/main -t subscriber
     depends_on:
       - mongodb
