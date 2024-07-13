@@ -1,5 +1,5 @@
 [package]
-name = "mongo_tput"
+name = "mongo_pc"
 version = "0.1.0"
 edition = "2021"
 
