@@ -51,9 +51,9 @@ impl From<String> for Approver {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Destination(String);
+struct Sender(String);
 
-impl From<String> for Destination {
+impl From<String> for Sender {
     fn from(s: String) -> Self {
         Self(s)
     }
@@ -63,7 +63,7 @@ impl From<String> for Destination {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "tag", content = "content")]
 enum Status {
-    Pending(Destination),
+    Pending(Sender),
     Approved(Approver),
     Processed,
     FailedToProcess(String),
@@ -129,7 +129,7 @@ impl Request {
             cid,
             accepted_at: Utc::now(),
             payload: payload.into(),
-            status: Status::Pending(Destination("sender".to_string())),
+            status: Status::Pending(Sender("sender".to_string())),
             unique_req_data,
         }
     }
@@ -143,7 +143,7 @@ impl Request {
             cid,
             accepted_at: Utc::now(),
             payload: payload.into(),
-            status: Status::Pending(Destination("sender".to_string())),
+            status: Status::Pending(Sender("sender".to_string())),
             unique_req_data,
         }
     }

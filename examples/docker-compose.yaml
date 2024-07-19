@@ -29,7 +29,7 @@ services:
     attach: true
 
   producer:
-    image: mongo_pc:lastest
+    image: ubuntu:latest
     init: true
     depends_on:
       - mongodb
@@ -57,7 +57,7 @@ services:
     entrypoint: target/debug/examples/main -t producer
 
   consumer1:
-    image: mongo_pc:lastest
+    image: ubuntu:latest
     init: true
     hostname: consumer1
     # # For memory profiling
@@ -78,7 +78,7 @@ services:
       - mongodb
 
   consumer2:
-    image: mongo_pc:lastest
+    image: ubuntu:latest
     init: true
     hostname: consumer2
     volumes:
@@ -93,7 +93,7 @@ services:
       - mongodb
 
   consumer3:
-    image: mongo_pc:lastest
+    image: ubuntu:latest
     init: true
     hostname: consumer3
     volumes:
@@ -108,7 +108,7 @@ services:
       - mongodb
 
   subscriber:
-    image: mongo_pc:lastest
+    image: ubuntu:latest
     init: true
     hostname: consumer3
     volumes:
