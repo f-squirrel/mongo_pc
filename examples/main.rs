@@ -1,4 +1,3 @@
-
 use mongo_pc::api;
 
 use mongo_pc::handle;
@@ -65,6 +64,7 @@ impl From<String> for Sender {
 enum Status {
     Pending(Sender),
     Approved(Approver),
+    Declined(Approver),
     Processed,
     FailedToProcess(String),
     Finalized,
@@ -77,6 +77,7 @@ impl StatusT for Status {
         match self {
             Status::Pending(_) => StatusQuery::Pending,
             Status::Approved(_) => StatusQuery::Approved,
+            Status::Declined(_) => StatusQuery::Declined,
             Status::Processed => StatusQuery::Processed,
             Status::FailedToProcess(_) => StatusQuery::FailedToProcess,
             Status::Finalized => StatusQuery::Finalized,
@@ -89,6 +90,7 @@ impl StatusT for Status {
 enum StatusQuery {
     Pending,
     Approved,
+    Declined,
     Processed,
     FailedToProcess,
     Finalized,
